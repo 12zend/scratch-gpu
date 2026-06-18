@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>test</title>
+<style>body{font-family:monospace;padding:8px;background:#111;color:#ddd;font-size:12px}canvas{display:block;margin:4px}.row{display:flex;gap:20px}pre{font-size:11px;max-height:300px;overflow:auto;background:#222;padding:6px}</style>
+</head>
+<body>
+<button id="loadBtn">Load</button>
+<div class="row">
+  <div><p>CPU</p><div id="c" style="width:480px;height:360px;background:#000"></div></div>
+  <div><p>GPU</p><div id="g" style="width:480px;height:360px;background:#000"></div></div>
+</div>
+<pre id="logs"></pre>
+<script src="../dist/scaffolding-min.js"></script>
+<script>
+const log=(m)=>{document.querySelector('#logs').textContent+=m+'\n';console.log(m)};
+const s=new Scaffolding.Scaffolding();window.scaffolding=s;s.editableLists=true;s.setup();s.appendTo(document.querySelector('#c'));window.vm=s.vm;document.querySelector('#g').appendChild(s._shaderCanvas);
+document.getElementById('loadBtn').onclick=async()=>{
+  log('loading...');
+  const r=await fetch('../test/uow5.sb3');const b=await r.arrayBuffer();
+  await s.loadProject(b);log('loaded');
+  await new Promise(r=>setTimeout(r,200));
+  s.greenFlag();
+  await new Promise(r=>setTimeout(r,2500));
+  const sc=s._shaderCanvas;const off=document.createElement('canvas');off.width=sc.width;off.height=sc.height;off.getContext('2d').drawImage(sc,0,0);
+  const img=off.getContext('2d').getImageData(0,0,sc.width,sc.height);
+  let nz=0,sumR=0,sumG=0,sumB=0;
+  for(let y=0;y<sc.height;y++)for(let x=0;x<sc.width;x++){const i=(y*sc.width+x)*4;if(img.data[i]||img.data[i+1]||img.data[i+2]){nz++;sumR+=img.data[i];sumG+=img.data[i+1];sumB+=img.data[i+2]}}
+  log('non-zero: '+nz+'/'+(sc.width*sc.height)+' avg RGB: '+Math.round(sumR/nz)+','+Math.round(sumG/nz)+','+Math.round(sumB/nz));
+  const sample=[];
+  for(let x=0;x<sc.width;x+=40){const px=new Uint8Array(4);const gl=sc.getContext('webgl');gl.readPixels(x,10,1,1,gl.RGBA,gl.UNSIGNED_BYTE,px);sample.push(x+':('+px[0]+','+px[1]+','+px[2]+')')}
+  log('top row: '+sample.join(' '));
+  // Dump sc_lget_4_2 function
+  const sr = s._shaderRenderer;
+  if (sr && sr._compiled) {
+    const src = sr._compiled.fragmentSource;
+    const lines = src.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('float sc_lget_4_2(float idx)')) {
+        log('sc_lget_4_2: ' + lines.slice(i, i+8).join('\n'));
+        break;
+      }
+    }
+  }
+};
+</script>
+</body>
+</html>
