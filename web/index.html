@@ -3,101 +3,170 @@
 <head>
 <meta charset="utf-8">
 <title>scratch-gpu</title>
+<link rel="icon" href="data:,">
 <style>
-  html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+  }
+
   #drop {
     position: fixed;
     inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: rgba(255, 255, 255, 0.18);
+    flex-direction: column;
+    gap: 12px;
+    color: rgba(255, 255, 255, 0.5);
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 11px;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    pointer-events: none;
     transition: color 0.2s, background 0.2s;
-    z-index: 1;
+    z-index: 10;
   }
   #drop.over {
-    color: rgba(255, 255, 255, 0.7);
-    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.95);
+    background: rgba(255, 255, 255, 0.05);
   }
   #drop.hidden { display: none; }
-  canvas { display: block; }
+  #drop .picker {
+    pointer-events: auto;
+    text-decoration: underline;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.6);
+  }
+  /* Keep the file input off-screen but interactive so its click() is reliable. */
+  #file-input {
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  #status {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 20;
+    color: rgba(255, 255, 255, 0.5);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    pointer-events: none;
+    white-space: pre;
+  }
+
+  /* Hide everything inside scaffolding except the shader canvas. */
+  .sc-root .sc-canvas,
+  .sc-root .sc-scaled-overlays-outer,
+  .sc-root .sc-monitor-overlay,
+  .sc-root .sc-question-root,
+  .sc-root .sc-controls-bar {
+    display: none !important;
+  }
+  .sc-root {
+    background: #000;
+  }
 </style>
 </head>
 <body>
-<div id="drop">drop .sb3 &nbsp;·&nbsp; esc to reset</div>
-<script src="../dist/scaffolding-min.js"></script>
+<div id="drop">
+  <div>drop .sb3 &nbsp;·&nbsp; esc to reset</div>
+  <label class="picker" id="picker" for="file-input">or click to choose file</label>
+</div>
+<input type="file" id="file-input" accept=".sb3">
+<div id="status">ready</div>
+<script src="scaffolding-min.js"></script>
 <script>
+  const status = document.getElementById('status');
+  const log = (msg) => { status.textContent = msg; console.log('[scratch-gpu]', msg); };
+
   const s = new Scaffolding.Scaffolding();
+  s.width = 480;
+  s.height = 360;
+  s.shaderScale = 1;
   s.editableLists = true;
   s.shouldConnectPeripherals = false;
   s.setup();
-
-  // The Scaffolding's _shaderCanvas is created in setup() but not yet
-  // attached to the DOM (appendTo would mount the whole UI). Pull it
-  // out, stretch it across the viewport, and drop it straight on
-  // <body> so the user only ever sees the rendered image.
-  const canvas = s._shaderCanvas;
-  canvas.remove();
-  canvas.style.position = 'fixed';
-  canvas.style.inset = '0';
-  canvas.style.width = '100vw';
-  canvas.style.height = '100vh';
-  document.body.appendChild(canvas);
+  s.appendTo(document.body);
 
   const drop = document.getElementById('drop');
+  const fileInput = document.getElementById('file-input');
+  const picker = document.getElementById('picker');
   let loaded = false;
 
-  function fit () {
-    // Render at device-pixel resolution so right-click → "Save image as"
-    // produces a sharp PNG.
-    const dpr = window.devicePixelRatio || 1;
-    s._shaderRenderer.resize(
-      Math.max(1, Math.floor(window.innerWidth * dpr)),
-      Math.max(1, Math.floor(window.innerHeight * dpr))
-    );
-  }
-  fit();
-  // Listen *after* setup() so the Scaffolding's own resize handler has
-  // already fired; ours then overrides the canvas size for the viewport.
-  window.addEventListener('resize', fit);
-
-  // The Scaffolding's start() renders once. Drive a continuous loop
-  // ourselves so `u_time` advances and the path tracer's per-frame
-  // uniform updates are visible.
-  (function tick () {
-    if (loaded) s._shaderRenderer.render();
-    requestAnimationFrame(tick);
-  })();
-
-  window.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    drop.classList.add('over');
-  });
-  window.addEventListener('dragleave', (e) => {
-    if (e.relatedTarget == null) drop.classList.remove('over');
-  });
-  window.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    drop.classList.remove('over');
-    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-    if (!file) return;
-    const buf = await file.arrayBuffer();
+  async function handleFile (file) {
+    if (!file) { log('no file'); return; }
+    log('loading: ' + file.name);
+    let buf;
+    try {
+      buf = await file.arrayBuffer();
+    } catch (err) {
+      log('read failed: ' + err.message);
+      console.error(err);
+      return;
+    }
     try {
       await s.loadProject(buf);
       drop.classList.add('hidden');
       loaded = true;
+      log('green flag');
       s.greenFlag();
+      if (s._shaderRenderer) s._shaderRenderer.render();
+      log('rendered: ' + s._shaderCanvas.width + 'x' + s._shaderCanvas.height);
     } catch (err) {
-      console.error('load failed:', err);
+      log('load failed: ' + err.message);
+      console.error(err);
     }
+  }
+
+  // Drag handling: listen on document AND the Scaffolding's _root so
+  // we catch drops no matter which child the cursor is over.
+  function onDragOver (e) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    drop.classList.add('over');
+  }
+  function onDragLeave (e) {
+    if (e.relatedTarget == null) drop.classList.remove('over');
+  }
+  function onDrop (e) {
+    e.preventDefault();
+    drop.classList.remove('over');
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    handleFile(file);
+  }
+
+  document.addEventListener('dragover', onDragOver);
+  document.addEventListener('dragleave', onDragLeave);
+  document.addEventListener('drop', onDrop);
+  // Also bind to the Scaffolding root in case document-level listeners
+  // are blocked by an extension or layout edge case.
+  if (s._root) {
+    s._root.addEventListener('dragover', onDragOver);
+    s._root.addEventListener('drop', onDrop);
+  }
+
+  // File-input fallback: the <label for="file-input"> triggers the native
+  // picker natively, so we only need to listen for the change event here.
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    handleFile(file);
+    // Reset so selecting the same file twice still fires change.
+    fileInput.value = '';
   });
 
-  // Esc reloads the page so a new project can be dropped.
+  window.addEventListener('resize', () => s.relayout());
+
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && loaded) location.reload();
   });
