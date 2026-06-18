@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>scratch-gpu</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
+  #drop {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.18);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    pointer-events: none;
+    transition: color 0.2s, background 0.2s;
+    z-index: 1;
+  }
+  #drop.over {
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.03);
+  }
+  #drop.hidden { display: none; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="drop">drop .sb3 &nbsp;·&nbsp; esc to reset</div>
+<script src="../dist/scaffolding-min.js"></script>
+<script>
+  const s = new Scaffolding.Scaffolding();
+  s.editableLists = true;
+  s.shouldConnectPeripherals = false;
+  s.setup();
+
+  // The Scaffolding's _shaderCanvas is created in setup() but not yet
+  // attached to the DOM (appendTo would mount the whole UI). Pull it
+  // out, stretch it across the viewport, and drop it straight on
+  // <body> so the user only ever sees the rendered image.
+  const canvas = s._shaderCanvas;
+  canvas.remove();
+  canvas.style.position = 'fixed';
+  canvas.style.inset = '0';
+  canvas.style.width = '100vw';
+  canvas.style.height = '100vh';
+  document.body.appendChild(canvas);
+
+  const drop = document.getElementById('drop');
+  let loaded = false;
+
+  function fit () {
+    // Render at device-pixel resolution so right-click → "Save image as"
+    // produces a sharp PNG.
+    const dpr = window.devicePixelRatio || 1;
+    s._shaderRenderer.resize(
+      Math.max(1, Math.floor(window.innerWidth * dpr)),
+      Math.max(1, Math.floor(window.innerHeight * dpr))
+    );
+  }
+  fit();
+  // Listen *after* setup() so the Scaffolding's own resize handler has
+  // already fired; ours then overrides the canvas size for the viewport.
+  window.addEventListener('resize', fit);
+
+  // The Scaffolding's start() renders once. Drive a continuous loop
+  // ourselves so `u_time` advances and the path tracer's per-frame
+  // uniform updates are visible.
+  (function tick () {
+    if (loaded) s._shaderRenderer.render();
+    requestAnimationFrame(tick);
+  })();
+
+  window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    drop.classList.add('over');
+  });
+  window.addEventListener('dragleave', (e) => {
+    if (e.relatedTarget == null) drop.classList.remove('over');
+  });
+  window.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    try {
+      await s.loadProject(buf);
+      drop.classList.add('hidden');
+      loaded = true;
+      s.greenFlag();
+    } catch (err) {
+      console.error('load failed:', err);
+    }
+  });
+
+  // Esc reloads the page so a new project can be dropped.
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && loaded) location.reload();
+  });
+</script>
+</body>
+</html>
