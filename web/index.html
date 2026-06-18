@@ -73,6 +73,11 @@
   .sc-root .sc-controls-bar {
     display: none !important;
   }
+  /* Hide the shader diagnostics overlay. */
+  .sc-shader-status { display: none !important; }
+  /* Let the shader canvas receive right-clicks so Chrome's image
+     context menu (save / copy / open in new tab) shows up. */
+  .sc-shader-canvas { pointer-events: auto !important; }
   .sc-root {
     background: #000;
   }
