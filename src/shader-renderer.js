@@ -7,7 +7,27 @@ const VERT_SRC = [
 
 const QUAD = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
 
-const MAX_TEX_SIZE = 4096;
+const MAX_TEX_SIZE = 2048;
+
+const _f32 = new Float32Array(1);
+const _i32 = new Int32Array(_f32.buffer);
+const floatToHalf = (val) => {
+  _f32[0] = val;
+  const x = _i32[0];
+  const sign = (x >>> 16) & 0x8000;
+  let exp = ((x >>> 23) & 0xff) - (127 - 15);
+  let mant = x & 0x7fffff;
+  if (exp <= 0) {
+    if (exp < -10) return sign;
+    mant = (mant | 0x800000) >> (1 - exp);
+    return sign | (mant >> 13);
+  }
+  if (exp === 0xff - (127 - 15)) {
+    if (mant === 0) return sign | 0x7c00;
+    return sign | 0x7c00 | (mant >> 13);
+  }
+  return sign | (exp << 10) | (mant >> 13);
+};
 
 class ShaderRenderer {
   constructor (canvas) {
@@ -17,7 +37,13 @@ class ShaderRenderer {
     if (!this.gl) {
       throw new Error('WebGL is not available; shader renderer disabled.');
     }
+    this._halfFloatExt = this.gl.getExtension('OES_texture_half_float');
     this._floatExt = this.gl.getExtension('OES_texture_float');
+    this._texType = this._halfFloatExt
+      ? this._halfFloatExt.HALF_FLOAT_OES
+      : (this._floatExt ? this.gl.FLOAT : this.gl.UNSIGNED_BYTE);
+    this._isHalfFloat = !!this._halfFloatExt;
+    this._isFloat = !this._halfFloatExt && !!this._floatExt;
     this._program = null;
     this._compiled = null;
     this._readVariable = () => 0;
@@ -147,17 +173,23 @@ class ShaderRenderer {
     }
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    const type = this._floatExt ? gl.FLOAT : gl.UNSIGNED_BYTE;
-    if (!this._floatExt) {
-      const byteBuf = new Uint8Array(texels * 4);
+    const type = this._texType;
+    let uploadBuf;
+    if (this._isHalfFloat) {
+      uploadBuf = new Uint16Array(texels * 4);
+      for (let i = 0; i < buf.length; i++) {
+        uploadBuf[i] = floatToHalf(buf[i]);
+      }
+    } else if (this._isFloat) {
+      uploadBuf = buf;
+    } else {
+      uploadBuf = new Uint8Array(texels * 4);
       for (let i = 0; i < buf.length; i++) {
         const v = Math.max(0, Math.min(255, Math.round(buf[i])));
-        byteBuf[i] = v;
+        uploadBuf[i] = v;
       }
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, totalHeight, 0, gl.RGBA, type, byteBuf);
-    } else {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, totalHeight, 0, gl.RGBA, type, buf);
     }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, totalHeight, 0, gl.RGBA, type, uploadBuf);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
