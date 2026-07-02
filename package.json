@@ -1,51 +1,17 @@
 {
-  "name": "scratch-gpu",
-  "version": "1.0.0",
-  "description": "Scratch GPU shader compiler — drop an .sb3 and watch pixel() run on the GPU.",
-  "main": "electron/main.js",
+  "name": "@turbowarp/scaffolding",
+  "version": "0.4.0",
+  "description": "Minimal Scratch project runner.",
+  "main": "./dist/scaffolding-min.js",
   "types": "./types.d.ts",
+  "exports": {
+    ".": "./dist/scaffolding-min.js",
+    "./min": "./dist/scaffolding-min.js",
+    "./with-music": "./dist/scaffolding-with-music.js"
+  },
   "scripts": {
     "build": "webpack",
-    "prepublishOnly": "cross-env NODE_ENV=production webpack",
-    "start": "electron electron/main.js",
-    "dist": "npm run build && electron-builder",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win"
-  },
-  "build": {
-    "appId": "com.scratchgpu.app",
-    "productName": "ScratchGPU",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "electron/**/*",
-      "dist/scaffolding-min.js",
-      "dist/scaffolding-min.js.map",
-      "dist/extension worker.js",
-      "dist/extension worker.js.map",
-      "dist/*.worker.js",
-      "dist/*.worker.js.map"
-    ],
-    "mac": {
-      "category": "public.app-category.developer-tools",
-      "icon": "electron/icons/icon.icns",
-      "target": [
-        "dmg",
-        "zip"
-      ]
-    },
-    "win": {
-      "icon": "electron/icons/icon.ico",
-      "target": [
-        "nsis",
-        "portable"
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
+    "prepublishOnly": "cross-env NODE_ENV=production webpack"
   },
   "repository": {
     "type": "git",
@@ -62,8 +28,6 @@
     "@turbowarp/scratch-svg-renderer": "^1.1.0",
     "babel-loader": "^8.3.0",
     "cross-env": "^7.0.3",
-    "electron": "^42.4.1",
-    "electron-builder": "^26.15.3",
     "scratch-audio": "github:TurboWarp/scratch-audio#develop",
     "scratch-render": "github:TurboWarp/scratch-render#develop",
     "scratch-vm": "github:TurboWarp/scratch-vm#develop",

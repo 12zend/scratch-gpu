@@ -87617,11 +87617,15 @@ class ScratchShaderCompiler {
     if (this._listPacks.length) {
       lines.push('uniform sampler2D sc_ltex;');
       lines.push('uniform vec2 sc_ltex_size;');
+      lines.push('uniform vec2 sc_ltex_size_inv;');
       for (let ti = 0; ti < this._listPacks.length; ti++) {
         const pack = this._listPacks[ti];
+        // Pack sc_lsize and sc_loffset into a single vec3 uniform:
+        //   .x = texture width (constant for the whole atlas),
+        //   .y = pack height,
+        //   .z = vertical offset in the atlas.
+        lines.push("uniform vec3 sc_lmeta_".concat(ti, ";"));
         lines.push("uniform vec4 sc_llen_".concat(ti, ";"));
-        lines.push("uniform vec2 sc_lsize_".concat(ti, ";"));
-        lines.push("uniform float sc_loffset_".concat(ti, ";"));
         for (let ci = 0; ci < pack.channels.length; ci++) {
           const ch = pack.channels[ci];
           if (!ch) continue;
@@ -87631,9 +87635,9 @@ class ScratchShaderCompiler {
           lines.push("  float len = sc_llen_".concat(ti, ".").concat(swiz, ";"));
           lines.push('  if (len <= 0.0) return 0.0;');
           lines.push('  float i = clamp(idx - 1.0, 0.0, len - 1.0);');
-          lines.push("  float x = mod(i, sc_lsize_".concat(ti, ".x) + 0.5;"));
-          lines.push("  float y = sc_loffset_".concat(ti, " + floor(i / sc_lsize_").concat(ti, ".x) + 0.5;"));
-          lines.push('  return texture2D(sc_ltex, vec2(x / sc_ltex_size.x, y / sc_ltex_size.y)).' + swiz + ';');
+          lines.push("  float x = mod(i, sc_lmeta_".concat(ti, ".x) + 0.5;"));
+          lines.push("  float y = sc_lmeta_".concat(ti, ".z + floor(i / sc_lmeta_").concat(ti, ".x) + 0.5;"));
+          lines.push("  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).".concat(swiz, ";"));
           lines.push('}');
         }
       }
@@ -88118,6 +88122,8 @@ class ScratchShaderCompiler {
           if (String(name).toLowerCase() === 'color') return 'sc_color';
           return this._uid(name, 'sc_v_');
         }
+      case 'sensing_timer':
+        return 'u_time';
       case 'argument_reporter_string_number':
       case 'argument_reporter_boolean':
         {
@@ -88285,25 +88291,6 @@ __webpack_require__.r(__webpack_exports__);
 const VERT_SRC = ['attribute vec2 a_pos;', 'void main() {', '  gl_Position = vec4(a_pos, 0.0, 1.0);', '}'].join('\n');
 const QUAD = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
 const MAX_TEX_SIZE = 2048;
-const _f32 = new Float32Array(1);
-const _i32 = new Int32Array(_f32.buffer);
-const floatToHalf = val => {
-  _f32[0] = val;
-  const x = _i32[0];
-  const sign = x >>> 16 & 0x8000;
-  let exp = (x >>> 23 & 0xff) - (127 - 15);
-  let mant = x & 0x7fffff;
-  if (exp <= 0) {
-    if (exp < -10) return sign;
-    mant = (mant | 0x800000) >> 1 - exp;
-    return sign | mant >> 13;
-  }
-  if (exp === 0xff - (127 - 15)) {
-    if (mant === 0) return sign | 0x7c00;
-    return sign | 0x7c00 | mant >> 13;
-  }
-  return sign | exp << 10 | mant >> 13;
-};
 class ShaderRenderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -88317,11 +88304,9 @@ class ShaderRenderer {
     if (!this.gl) {
       throw new Error('WebGL is not available; shader renderer disabled.');
     }
-    this._halfFloatExt = this.gl.getExtension('OES_texture_half_float');
     this._floatExt = this.gl.getExtension('OES_texture_float');
-    this._texType = this._halfFloatExt ? this._halfFloatExt.HALF_FLOAT_OES : this._floatExt ? this.gl.FLOAT : this.gl.UNSIGNED_BYTE;
-    this._isHalfFloat = !!this._halfFloatExt;
-    this._isFloat = !this._halfFloatExt && !!this._floatExt;
+    this._texType = this._floatExt ? this.gl.FLOAT : this.gl.UNSIGNED_BYTE;
+    this._isFloat = !!this._floatExt;
     this._program = null;
     this._compiled = null;
     this._readVariable = () => 0;
@@ -88336,6 +88321,7 @@ class ShaderRenderer {
     this._glErrors = [];
     this._glErrorCounts = {};
     this._maxGlErrorLog = 16;
+    this._rafId = null;
   }
   getGlErrors() {
     return this._glErrors.slice();
@@ -88453,12 +88439,7 @@ class ShaderRenderer {
     gl.bindTexture(gl.TEXTURE_2D, tex);
     const type = this._texType;
     let uploadBuf;
-    if (this._isHalfFloat) {
-      uploadBuf = new Uint16Array(texels * 4);
-      for (let i = 0; i < buf.length; i++) {
-        uploadBuf[i] = floatToHalf(buf[i]);
-      }
-    } else if (this._isFloat) {
+    if (this._isFloat) {
       uploadBuf = buf;
     } else {
       uploadBuf = new Uint8Array(texels * 4);
@@ -88501,13 +88482,13 @@ class ShaderRenderer {
     this._locations.listAtlas = {
       tex: gl.getUniformLocation(program, 'sc_ltex'),
       size: gl.getUniformLocation(program, 'sc_ltex_size'),
+      sizeInv: gl.getUniformLocation(program, 'sc_ltex_size_inv'),
       packs: []
     };
     for (let pi = 0; pi <= maxTexIndex; pi++) {
       this._locations.listAtlas.packs.push({
         llen: gl.getUniformLocation(program, "sc_llen_".concat(pi)),
-        lsize: gl.getUniformLocation(program, "sc_lsize_".concat(pi)),
-        offset: gl.getUniformLocation(program, "sc_loffset_".concat(pi))
+        lmeta: gl.getUniformLocation(program, "sc_lmeta_".concat(pi))
       });
     }
   }
@@ -88571,10 +88552,21 @@ class ShaderRenderer {
     if (!this._program) return;
     this._running = true;
     if (!this._startTime) this._startTime = performance.now();
-    this.render();
+    this._loop();
+  }
+  _loop() {
+    this._rafId = requestAnimationFrame(() => {
+      if (!this._running) return;
+      this.render();
+      if (this._running) this._loop();
+    });
   }
   stop() {
     this._running = false;
+    if (this._rafId !== null) {
+      cancelAnimationFrame(this._rafId);
+      this._rafId = null;
+    }
   }
   render() {
     const gl = this.gl;
@@ -88595,13 +88587,13 @@ class ShaderRenderer {
       gl.bindTexture(gl.TEXTURE_2D, atlas.texture);
       gl.uniform1i(atlasLoc.tex, 0);
       gl.uniform2f(atlasLoc.size, atlas.width, atlas.height);
+      gl.uniform2f(atlasLoc.sizeInv, 1 / atlas.width, 1 / atlas.height);
       for (let pi = 0; pi < atlas.packs.length; pi++) {
         const pack = atlas.packs[pi];
         const loc = atlasLoc.packs[pi];
         if (!pack || !loc) continue;
         gl.uniform4f(loc.llen, pack.lengths[0] || 0, pack.lengths[1] || 0, pack.lengths[2] || 0, pack.lengths[3] || 0);
-        gl.uniform2f(loc.lsize, atlas.width, pack.height);
-        gl.uniform1f(loc.offset, pack.offset);
+        gl.uniform3f(loc.lmeta, atlas.width, pack.height, pack.offset);
       }
     }
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);

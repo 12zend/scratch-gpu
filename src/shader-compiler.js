@@ -467,11 +467,15 @@ export class ScratchShaderCompiler {
     if (this._listPacks.length) {
       lines.push('uniform sampler2D sc_ltex;');
       lines.push('uniform vec2 sc_ltex_size;');
+      lines.push('uniform vec2 sc_ltex_size_inv;');
       for (let ti = 0; ti < this._listPacks.length; ti++) {
         const pack = this._listPacks[ti];
+        // Pack sc_lsize and sc_loffset into a single vec3 uniform:
+        //   .x = texture width (constant for the whole atlas),
+        //   .y = pack height,
+        //   .z = vertical offset in the atlas.
+        lines.push(`uniform vec3 sc_lmeta_${ti};`);
         lines.push(`uniform vec4 sc_llen_${ti};`);
-        lines.push(`uniform vec2 sc_lsize_${ti};`);
-        lines.push(`uniform float sc_loffset_${ti};`);
         for (let ci = 0; ci < pack.channels.length; ci++) {
           const ch = pack.channels[ci];
           if (!ch) continue;
@@ -481,9 +485,9 @@ export class ScratchShaderCompiler {
           lines.push(`  float len = sc_llen_${ti}.${swiz};`);
           lines.push('  if (len <= 0.0) return 0.0;');
           lines.push('  float i = clamp(idx - 1.0, 0.0, len - 1.0);');
-          lines.push(`  float x = mod(i, sc_lsize_${ti}.x) + 0.5;`);
-          lines.push(`  float y = sc_loffset_${ti} + floor(i / sc_lsize_${ti}.x) + 0.5;`);
-          lines.push('  return texture2D(sc_ltex, vec2(x / sc_ltex_size.x, y / sc_ltex_size.y)).' + swiz + ';');
+          lines.push(`  float x = mod(i, sc_lmeta_${ti}.x) + 0.5;`);
+          lines.push(`  float y = sc_lmeta_${ti}.z + floor(i / sc_lmeta_${ti}.x) + 0.5;`);
+          lines.push(`  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).${swiz};`);
           lines.push('}');
         }
       }
@@ -964,6 +968,8 @@ export class ScratchShaderCompiler {
         if (String(name).toLowerCase() === 'color') return 'sc_color';
         return this._uid(name, 'sc_v_');
       }
+      case 'sensing_timer':
+        return 'u_time';
       case 'argument_reporter_string_number':
       case 'argument_reporter_boolean': {
         const name = String(this._getField(b, 'VALUE'));

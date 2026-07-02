@@ -98,9 +98,9 @@
   const s = new Scaffolding.Scaffolding();
   s.width = 480;
   s.height = 360;
-  // 0.5 cuts shader pixel work to 1/4 and is much friendlier on weak GPUs
-  // (e.g. M1 with this project's path tracer). Set to 1 for full quality.
-  s.shaderScale = 0.5;
+  // 1.0 renders the shader at the full 480x360 stage size. Lower values cut
+  // pixel work and are friendlier on weak GPUs; set to 0.5 for 240x180.
+  s.shaderScale = 1;
   s.editableLists = true;
   s.shouldConnectPeripherals = false;
   s.setup();
