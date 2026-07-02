@@ -255,7 +255,8 @@ class Scaffolding extends EventTarget {
       this._updateShaderStatus();
       return;
     }
-    this._shaderRenderer.setListReader((name) => this._readShaderList(name));
+    this._shaderRenderer.setVariableCacheProvider(() => this._buildVariableCache());
+    this._shaderRenderer.setListReader((name) => this._readShaderListCached(name));
     this._shaderRenderer.uploadListData();
     this._shaderRenderer.resize(this.width * this.shaderScale, this.height * this.shaderScale);
     this._shaderCanvas.style.display = 'block';
@@ -290,8 +291,38 @@ class Scaffolding extends EventTarget {
 
   refreshShaderLists () {
     if (this._shaderRenderer && this.shaderEnabled) {
+      this._listDataCache = null;
       this._shaderRenderer.uploadListData();
     }
+  }
+
+  _buildVariableCache () {
+    const cache = {};
+    const targets = this.vm && this.vm.runtime && this.vm.runtime.targets || [];
+    for (const target of targets) {
+      if (!target || !target.variables) continue;
+      for (const id in target.variables) {
+        const v = target.variables[id];
+        if (v.type === 'list') continue;
+        if (cache[v.name] !== undefined) continue;
+        const val = v.value;
+        if (typeof val === 'number') cache[v.name] = val;
+        else if (typeof val === 'boolean') cache[v.name] = val ? 1 : 0;
+        else { const n = parseFloat(val); cache[v.name] = isFinite(n) ? n : 0; }
+      }
+    }
+    return cache;
+  }
+
+  _readShaderListCached (name) {
+    if (!this._listDataCache) {
+      this._listDataCache = new Map();
+    }
+    const cached = this._listDataCache.get(name);
+    if (cached !== undefined) return cached;
+    const data = this._readShaderList(name);
+    this._listDataCache.set(name, data);
+    return data;
   }
 
   disableShader () {
@@ -307,9 +338,18 @@ class Scaffolding extends EventTarget {
 
   _startShaderErrorPolling () {
     if (this._shaderErrorPolling) return;
-    this._shaderErrorPolling = setInterval(() => {
+    let count = 0;
+    const MAX_POLLS = 10;
+    const poll = () => {
       if (this._shaderRenderer) this._updateShaderStatus();
-    }, 500);
+      count++;
+      if (count >= MAX_POLLS) {
+        this._shaderErrorPolling = null;
+        return;
+      }
+      this._shaderErrorPolling = setTimeout(poll, 500);
+    };
+    this._shaderErrorPolling = setTimeout(poll, 500);
   }
 
   _scratchCoordinates (x, y) {
@@ -781,6 +821,8 @@ class Scaffolding extends EventTarget {
     if (this._shaderListRefreshTimer) return;
     let lastSignature = null;
     let stableCount = 0;
+    let tickCount = 0;
+    const MAX_TICKS = 40;
     const tick = () => {
       const sig = this._computeListSignature();
       if (sig === lastSignature) {
@@ -790,11 +832,13 @@ class Scaffolding extends EventTarget {
         lastSignature = sig;
       }
       this.refreshShaderLists();
-      // Keep refreshing while the list data is still changing; once it has been
-      // stable for a few ticks we can back off to a slow poll (lists may still be
-      // mutated at runtime by some projects).
-      const stable = stableCount >= 5;
-      this._shaderListRefreshTimer = setTimeout(tick, stable ? 1000 : 250);
+      tickCount++;
+      const stable = stableCount >= 3;
+      if (stable || tickCount >= MAX_TICKS) {
+        this._shaderListRefreshTimer = null;
+        return;
+      }
+      this._shaderListRefreshTimer = setTimeout(tick, 250);
     };
     this._shaderListRefreshTimer = setTimeout(tick, 250);
   }

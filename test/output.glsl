@@ -154,6 +154,7 @@ uniform sampler2D sc_ltex;
 uniform vec2 sc_ltex_size;
 uniform vec2 sc_ltex_size_inv;
 uniform vec3 sc_lmeta_0;
+uniform vec4 sc_llen_0;
 float sc_lget_0_0(float idx) {
   float len = sc_llen_0.x;
   if (len <= 0.0) return 0.0;
@@ -161,7 +162,6 @@ float sc_lget_0_0(float idx) {
   float x = mod(i, sc_lmeta_0.x) + 0.5;
   float y = sc_lmeta_0.z + floor(i / sc_lmeta_0.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-
 }
 float sc_lget_0_1(float idx) {
   float len = sc_llen_0.y;
@@ -170,7 +170,6 @@ float sc_lget_0_1(float idx) {
   float x = mod(i, sc_lmeta_0.x) + 0.5;
   float y = sc_lmeta_0.z + floor(i / sc_lmeta_0.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-
 }
 float sc_lget_0_2(float idx) {
   float len = sc_llen_0.z;
@@ -179,7 +178,6 @@ float sc_lget_0_2(float idx) {
   float x = mod(i, sc_lmeta_0.x) + 0.5;
   float y = sc_lmeta_0.z + floor(i / sc_lmeta_0.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-
 }
 float sc_lget_0_3(float idx) {
   float len = sc_llen_0.w;
@@ -188,9 +186,9 @@ float sc_lget_0_3(float idx) {
   float x = mod(i, sc_lmeta_0.x) + 0.5;
   float y = sc_lmeta_0.z + floor(i / sc_lmeta_0.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-
 }
 uniform vec3 sc_lmeta_1;
+uniform vec4 sc_llen_1;
 float sc_lget_1_0(float idx) {
   float len = sc_llen_1.x;
   if (len <= 0.0) return 0.0;
@@ -198,7 +196,6 @@ float sc_lget_1_0(float idx) {
   float x = mod(i, sc_lmeta_1.x) + 0.5;
   float y = sc_lmeta_1.z + floor(i / sc_lmeta_1.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-
 }
 float sc_lget_1_1(float idx) {
   float len = sc_llen_1.y;
@@ -207,7 +204,6 @@ float sc_lget_1_1(float idx) {
   float x = mod(i, sc_lmeta_1.x) + 0.5;
   float y = sc_lmeta_1.z + floor(i / sc_lmeta_1.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-
 }
 float sc_lget_1_2(float idx) {
   float len = sc_llen_1.z;
@@ -216,7 +212,6 @@ float sc_lget_1_2(float idx) {
   float x = mod(i, sc_lmeta_1.x) + 0.5;
   float y = sc_lmeta_1.z + floor(i / sc_lmeta_1.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-
 }
 float sc_lget_1_3(float idx) {
   float len = sc_llen_1.w;
@@ -225,9 +220,9 @@ float sc_lget_1_3(float idx) {
   float x = mod(i, sc_lmeta_1.x) + 0.5;
   float y = sc_lmeta_1.z + floor(i / sc_lmeta_1.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-
 }
 uniform vec3 sc_lmeta_2;
+uniform vec4 sc_llen_2;
 float sc_lget_2_0(float idx) {
   float len = sc_llen_2.x;
   if (len <= 0.0) return 0.0;
@@ -235,7 +230,6 @@ float sc_lget_2_0(float idx) {
   float x = mod(i, sc_lmeta_2.x) + 0.5;
   float y = sc_lmeta_2.z + floor(i / sc_lmeta_2.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-
 }
 float sc_lget_2_1(float idx) {
   float len = sc_llen_2.y;
@@ -244,7 +238,6 @@ float sc_lget_2_1(float idx) {
   float x = mod(i, sc_lmeta_2.x) + 0.5;
   float y = sc_lmeta_2.z + floor(i / sc_lmeta_2.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-
 }
 float sc_lget_2_2(float idx) {
   float len = sc_llen_2.z;
@@ -253,7 +246,6 @@ float sc_lget_2_2(float idx) {
   float x = mod(i, sc_lmeta_2.x) + 0.5;
   float y = sc_lmeta_2.z + floor(i / sc_lmeta_2.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-
 }
 float sc_lget_2_3(float idx) {
   float len = sc_llen_2.w;
@@ -262,9 +254,9 @@ float sc_lget_2_3(float idx) {
   float x = mod(i, sc_lmeta_2.x) + 0.5;
   float y = sc_lmeta_2.z + floor(i / sc_lmeta_2.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-
 }
 uniform vec3 sc_lmeta_3;
+uniform vec4 sc_llen_3;
 float sc_lget_3_0(float idx) {
   float len = sc_llen_3.x;
   if (len <= 0.0) return 0.0;
@@ -272,7 +264,6 @@ float sc_lget_3_0(float idx) {
   float x = mod(i, sc_lmeta_3.x) + 0.5;
   float y = sc_lmeta_3.z + floor(i / sc_lmeta_3.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-
 }
 float sc_lget_3_1(float idx) {
   float len = sc_llen_3.y;
@@ -281,7 +272,6 @@ float sc_lget_3_1(float idx) {
   float x = mod(i, sc_lmeta_3.x) + 0.5;
   float y = sc_lmeta_3.z + floor(i / sc_lmeta_3.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-
 }
 float sc_lget_3_2(float idx) {
   float len = sc_llen_3.z;
@@ -290,7 +280,6 @@ float sc_lget_3_2(float idx) {
   float x = mod(i, sc_lmeta_3.x) + 0.5;
   float y = sc_lmeta_3.z + floor(i / sc_lmeta_3.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-
 }
 float sc_lget_3_3(float idx) {
   float len = sc_llen_3.w;
@@ -299,9 +288,9 @@ float sc_lget_3_3(float idx) {
   float x = mod(i, sc_lmeta_3.x) + 0.5;
   float y = sc_lmeta_3.z + floor(i / sc_lmeta_3.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-
 }
 uniform vec3 sc_lmeta_4;
+uniform vec4 sc_llen_4;
 float sc_lget_4_0(float idx) {
   float len = sc_llen_4.x;
   if (len <= 0.0) return 0.0;
@@ -309,7 +298,6 @@ float sc_lget_4_0(float idx) {
   float x = mod(i, sc_lmeta_4.x) + 0.5;
   float y = sc_lmeta_4.z + floor(i / sc_lmeta_4.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-
 }
 float sc_lget_4_1(float idx) {
   float len = sc_llen_4.y;
@@ -318,7 +306,6 @@ float sc_lget_4_1(float idx) {
   float x = mod(i, sc_lmeta_4.x) + 0.5;
   float y = sc_lmeta_4.z + floor(i / sc_lmeta_4.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-
 }
 float sc_lget_4_2(float idx) {
   float len = sc_llen_4.z;
@@ -327,7 +314,6 @@ float sc_lget_4_2(float idx) {
   float x = mod(i, sc_lmeta_4.x) + 0.5;
   float y = sc_lmeta_4.z + floor(i / sc_lmeta_4.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-
 }
 float sc_lget_4_3(float idx) {
   float len = sc_llen_4.w;
@@ -336,9 +322,9 @@ float sc_lget_4_3(float idx) {
   float x = mod(i, sc_lmeta_4.x) + 0.5;
   float y = sc_lmeta_4.z + floor(i / sc_lmeta_4.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-
 }
 uniform vec3 sc_lmeta_5;
+uniform vec4 sc_llen_5;
 float sc_lget_5_0(float idx) {
   float len = sc_llen_5.x;
   if (len <= 0.0) return 0.0;
@@ -346,7 +332,6 @@ float sc_lget_5_0(float idx) {
   float x = mod(i, sc_lmeta_5.x) + 0.5;
   float y = sc_lmeta_5.z + floor(i / sc_lmeta_5.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-
 }
 float sc_lget_5_1(float idx) {
   float len = sc_llen_5.y;
@@ -355,7 +340,6 @@ float sc_lget_5_1(float idx) {
   float x = mod(i, sc_lmeta_5.x) + 0.5;
   float y = sc_lmeta_5.z + floor(i / sc_lmeta_5.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-
 }
 float sc_lget_5_2(float idx) {
   float len = sc_llen_5.z;
@@ -364,7 +348,6 @@ float sc_lget_5_2(float idx) {
   float x = mod(i, sc_lmeta_5.x) + 0.5;
   float y = sc_lmeta_5.z + floor(i / sc_lmeta_5.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-
 }
 float sc_lget_5_3(float idx) {
   float len = sc_llen_5.w;
@@ -373,9 +356,9 @@ float sc_lget_5_3(float idx) {
   float x = mod(i, sc_lmeta_5.x) + 0.5;
   float y = sc_lmeta_5.z + floor(i / sc_lmeta_5.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-
 }
 uniform vec3 sc_lmeta_6;
+uniform vec4 sc_llen_6;
 float sc_lget_6_0(float idx) {
   float len = sc_llen_6.x;
   if (len <= 0.0) return 0.0;
@@ -383,7 +366,6 @@ float sc_lget_6_0(float idx) {
   float x = mod(i, sc_lmeta_6.x) + 0.5;
   float y = sc_lmeta_6.z + floor(i / sc_lmeta_6.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-
 }
 float sc_lget_6_1(float idx) {
   float len = sc_llen_6.y;
@@ -392,7 +374,6 @@ float sc_lget_6_1(float idx) {
   float x = mod(i, sc_lmeta_6.x) + 0.5;
   float y = sc_lmeta_6.z + floor(i / sc_lmeta_6.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-
 }
 float sc_lget_6_2(float idx) {
   float len = sc_llen_6.z;
@@ -401,7 +382,6 @@ float sc_lget_6_2(float idx) {
   float x = mod(i, sc_lmeta_6.x) + 0.5;
   float y = sc_lmeta_6.z + floor(i / sc_lmeta_6.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-
 }
 float sc_lget_6_3(float idx) {
   float len = sc_llen_6.w;
@@ -410,9 +390,9 @@ float sc_lget_6_3(float idx) {
   float x = mod(i, sc_lmeta_6.x) + 0.5;
   float y = sc_lmeta_6.z + floor(i / sc_lmeta_6.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-
 }
 uniform vec3 sc_lmeta_7;
+uniform vec4 sc_llen_7;
 float sc_lget_7_0(float idx) {
   float len = sc_llen_7.x;
   if (len <= 0.0) return 0.0;
@@ -420,7 +400,6 @@ float sc_lget_7_0(float idx) {
   float x = mod(i, sc_lmeta_7.x) + 0.5;
   float y = sc_lmeta_7.z + floor(i / sc_lmeta_7.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-
 }
 float sc_lget_7_1(float idx) {
   float len = sc_llen_7.y;
@@ -429,7 +408,6 @@ float sc_lget_7_1(float idx) {
   float x = mod(i, sc_lmeta_7.x) + 0.5;
   float y = sc_lmeta_7.z + floor(i / sc_lmeta_7.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-
 }
 float sc_lget_7_2(float idx) {
   float len = sc_llen_7.z;
@@ -438,7 +416,6 @@ float sc_lget_7_2(float idx) {
   float x = mod(i, sc_lmeta_7.x) + 0.5;
   float y = sc_lmeta_7.z + floor(i / sc_lmeta_7.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-
 }
 float sc_lget_7_3(float idx) {
   float len = sc_llen_7.w;
@@ -447,9 +424,9 @@ float sc_lget_7_3(float idx) {
   float x = mod(i, sc_lmeta_7.x) + 0.5;
   float y = sc_lmeta_7.z + floor(i / sc_lmeta_7.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-
 }
 uniform vec3 sc_lmeta_8;
+uniform vec4 sc_llen_8;
 float sc_lget_8_0(float idx) {
   float len = sc_llen_8.x;
   if (len <= 0.0) return 0.0;
@@ -457,7 +434,6 @@ float sc_lget_8_0(float idx) {
   float x = mod(i, sc_lmeta_8.x) + 0.5;
   float y = sc_lmeta_8.z + floor(i / sc_lmeta_8.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-
 }
 float sc_lget_8_1(float idx) {
   float len = sc_llen_8.y;
@@ -466,7 +442,6 @@ float sc_lget_8_1(float idx) {
   float x = mod(i, sc_lmeta_8.x) + 0.5;
   float y = sc_lmeta_8.z + floor(i / sc_lmeta_8.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-
 }
 float sc_lget_8_2(float idx) {
   float len = sc_llen_8.z;
@@ -475,7 +450,6 @@ float sc_lget_8_2(float idx) {
   float x = mod(i, sc_lmeta_8.x) + 0.5;
   float y = sc_lmeta_8.z + floor(i / sc_lmeta_8.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-
 }
 float sc_lget_8_3(float idx) {
   float len = sc_llen_8.w;
@@ -484,9 +458,9 @@ float sc_lget_8_3(float idx) {
   float x = mod(i, sc_lmeta_8.x) + 0.5;
   float y = sc_lmeta_8.z + floor(i / sc_lmeta_8.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-
 }
 uniform vec3 sc_lmeta_9;
+uniform vec4 sc_llen_9;
 float sc_lget_9_0(float idx) {
   float len = sc_llen_9.x;
   if (len <= 0.0) return 0.0;
@@ -494,7 +468,6 @@ float sc_lget_9_0(float idx) {
   float x = mod(i, sc_lmeta_9.x) + 0.5;
   float y = sc_lmeta_9.z + floor(i / sc_lmeta_9.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-
 }
 float sc_lget_9_1(float idx) {
   float len = sc_llen_9.y;
@@ -503,7 +476,6 @@ float sc_lget_9_1(float idx) {
   float x = mod(i, sc_lmeta_9.x) + 0.5;
   float y = sc_lmeta_9.z + floor(i / sc_lmeta_9.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-
 }
 float sc_lget_9_2(float idx) {
   float len = sc_llen_9.z;
@@ -512,7 +484,6 @@ float sc_lget_9_2(float idx) {
   float x = mod(i, sc_lmeta_9.x) + 0.5;
   float y = sc_lmeta_9.z + floor(i / sc_lmeta_9.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-
 }
 float sc_lget_9_3(float idx) {
   float len = sc_llen_9.w;
@@ -521,9 +492,9 @@ float sc_lget_9_3(float idx) {
   float x = mod(i, sc_lmeta_9.x) + 0.5;
   float y = sc_lmeta_9.z + floor(i / sc_lmeta_9.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-
 }
 uniform vec3 sc_lmeta_10;
+uniform vec4 sc_llen_10;
 float sc_lget_10_0(float idx) {
   float len = sc_llen_10.x;
   if (len <= 0.0) return 0.0;
@@ -531,7 +502,6 @@ float sc_lget_10_0(float idx) {
   float x = mod(i, sc_lmeta_10.x) + 0.5;
   float y = sc_lmeta_10.z + floor(i / sc_lmeta_10.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-
 }
 float sc_lget_10_1(float idx) {
   float len = sc_llen_10.y;
@@ -540,17 +510,16 @@ float sc_lget_10_1(float idx) {
   float x = mod(i, sc_lmeta_10.x) + 0.5;
   float y = sc_lmeta_10.z + floor(i / sc_lmeta_10.x) + 0.5;
   return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-
 }
 
-float sc_la_stack[1024];
+float sc_la_stack[256];
 float sc_len_stack;
 float sc_laget_stack(float idx) {
   if (sc_len_stack <= 0.0) return 0.0;
   float gi = clamp(idx - 1.0, 0.0, sc_len_stack - 1.0);
   float result = 0.0;
-  for (int mi = 0; mi < 1024; mi++) {
-    if (float(mi) == gi) result = sc_la_stack[mi];
+  for (int mi = 0; mi < 256; mi++) {
+    if (float(mi) == gi) { result = sc_la_stack[mi]; break; }
   }
   return result;
 }
@@ -574,34 +543,34 @@ void sc_fn_pixel_s_s(in float sc_a_x, in float sc_a_y);
 
 void sc_fn_hsv2rgb_s_s_s(in float sc_a_h, in float sc_a_s, in float sc_a_v) {
   sc_v_c = (sc_a_s * sc_a_v);
-  sc_v_x = (sc_v_c * (1.0 - abs((((2.0 == 0.0) ? 0.0 : mod(((60.0 == 0.0) ? 1e20 : (sc_a_h / 60.0)), 2.0)) - 1.0))));
+  sc_v_x = (sc_v_c * (1.0 - abs((mod((sc_a_h / 60.0), 2.0) - 1.0))));
   sc_v_m = (sc_a_v - sc_v_c);
-  if (((sc_a_h < 60.0) ? 1.0 : 0.0) != 0.0) {
+  if ((sc_a_h < 60.0)) {
     sc_v_cr = sc_v_c;
     sc_v_cg = sc_v_x;
     sc_v_cb = 0.0;
   } else {
-    if (((sc_a_h < 120.0) ? 1.0 : 0.0) != 0.0) {
+    if ((sc_a_h < 120.0)) {
       sc_v_cr = sc_v_x;
       sc_v_cg = sc_v_c;
       sc_v_cb = 0.0;
     } else {
-      if (((sc_a_h < 180.0) ? 1.0 : 0.0) != 0.0) {
+      if ((sc_a_h < 180.0)) {
         sc_v_cr = 0.0;
         sc_v_cg = sc_v_c;
         sc_v_cb = sc_v_x;
       } else {
-        if (((sc_a_h < 240.0) ? 1.0 : 0.0) != 0.0) {
+        if ((sc_a_h < 240.0)) {
           sc_v_cr = 0.0;
           sc_v_cg = sc_v_x;
           sc_v_cb = sc_v_c;
         } else {
-          if (((sc_a_h < 300.0) ? 1.0 : 0.0) != 0.0) {
+          if ((sc_a_h < 300.0)) {
             sc_v_cr = sc_v_x;
             sc_v_cg = 0.0;
             sc_v_cb = sc_v_c;
           } else {
-            if (((sc_a_h < 360.0) ? 1.0 : 0.0) != 0.0) {
+            if ((sc_a_h < 360.0)) {
               sc_v_cr = sc_v_c;
               sc_v_cg = 0.0;
               sc_v_cb = sc_v_x;
@@ -625,7 +594,7 @@ void sc_fn_specular_s_s_s_normal_s_s_s_ior_s(in float sc_a_x, in float sc_a_y, i
   sc_v_cosi = (1.0 + ((sc_v_cosi + 1.0) * ((sc_v_cosi > -1.0) ? 1.0 : 0.0)));
   sc_v_etai = 1.0;
   sc_v_etat = sc_a_ior;
-  if (((sc_v_cosi < 0.0) ? 1.0 : 0.0) != 0.0) {
+  if ((sc_v_cosi < 0.0)) {
     sc_v_cosi = (0.0 - sc_v_cosi);
     sc_v_nx = sc_a_nx;
     sc_v_ny = sc_a_ny;
@@ -642,7 +611,7 @@ void sc_fn_specular_s_s_s_normal_s_s_s_ior_s(in float sc_a_x, in float sc_a_y, i
   sc_v_F0 = (sc_v_F0 * sc_v_F0);
   sc_v_xx = (1.0 - sc_v_cos_);
   sc_v_F = (sc_v_F0 + ((1.0 - sc_v_F0) * (sc_v_xx * (sc_v_xx * (sc_v_xx * (sc_v_xx * sc_v_xx))))));
-  if (((mix(0.0, 1.0, sc_rand(vec3(gl_FragCoord.xy, u_time + 0.0))) < sc_v_F) ? 1.0 : 0.0) != 0.0) {
+  if ((mix(0.0, 1.0, sc_rand(vec3(gl_FragCoord.xy, u_time + 0.0))) < sc_v_F)) {
     sc_v_d = ((sc_a_x * sc_a_nx) + ((sc_a_y * sc_a_ny) + (sc_a_z * sc_a_nz)));
     sc_v_specDirX = (sc_a_x - (sc_a_nx * (2.0 * sc_v_d)));
     sc_v_specDirY = (sc_a_y - (sc_a_ny * (2.0 * sc_v_d)));
@@ -650,7 +619,7 @@ void sc_fn_specular_s_s_s_normal_s_s_s_ior_s(in float sc_a_x, in float sc_a_y, i
   } else {
     sc_v_eta = ((sc_v_etat == 0.0) ? 1e20 : (sc_v_etai / sc_v_etat));
     sc_v_k = (1.0 - ((sc_v_eta * sc_v_eta) * (1.0 - (sc_v_cosi * sc_v_cosi))));
-    if (((sc_v_k < 0.0) ? 1.0 : 0.0) != 0.0) {
+    if ((sc_v_k < 0.0)) {
       sc_v_specDirX = 0.0;
       sc_v_specDirY = 0.0;
       sc_v_specDirZ = 0.0;
@@ -671,215 +640,61 @@ void sc_fn_normalize_s_s_s(in float sc_a_x, in float sc_a_y, in float sc_a_z) {
 }
 
 void sc_fn_intersectionAABB_s(in float sc_a_node) {
-  sc_v_t0 = (({
-  float len = sc_llen_4.z;
-  if (len <= 0.0) return 0.0;
-  float i = clamp(((sc_a_node + sc_v_raySignDX)) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_4.x) + 0.5;
-  float y = sc_lmeta_4.z + floor(i / sc_lmeta_4.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-} - sc_v_rayOX) * sc_v_invRayDX);
-  sc_v_ty1 = (({
-  float len = sc_llen_4.w;
-  if (len <= 0.0) return 0.0;
-  float i = clamp(((sc_a_node + sc_v_raySignDY)) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_4.x) + 0.5;
-  float y = sc_lmeta_4.z + floor(i / sc_lmeta_4.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-} - sc_v_rayOY) * sc_v_invRayDY);
-  if (((sc_v_t0 > sc_v_ty1) ? 1.0 : 0.0) != 0.0) {
+  sc_v_t0 = ((sc_lget_4_2((sc_a_node + sc_v_raySignDX)) - sc_v_rayOX) * sc_v_invRayDX);
+  sc_v_ty1 = ((sc_lget_4_3((sc_a_node + sc_v_raySignDY)) - sc_v_rayOY) * sc_v_invRayDY);
+  if ((sc_v_t0 > sc_v_ty1)) {
     sc_v_hit = 0.0;
     return;
   }
-  sc_v_t1 = (({
-  float len = sc_llen_5.x;
-  if (len <= 0.0) return 0.0;
-  float i = clamp(((sc_a_node + sc_v_raySignDX)) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_5.x) + 0.5;
-  float y = sc_lmeta_5.z + floor(i / sc_lmeta_5.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-} - sc_v_rayOX) * sc_v_invRayDX);
-  sc_v_ty0 = (({
-  float len = sc_llen_5.y;
-  if (len <= 0.0) return 0.0;
-  float i = clamp(((sc_a_node + sc_v_raySignDY)) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_5.x) + 0.5;
-  float y = sc_lmeta_5.z + floor(i / sc_lmeta_5.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-} - sc_v_rayOY) * sc_v_invRayDY);
-  if (((sc_v_ty0 > sc_v_t1) ? 1.0 : 0.0) != 0.0) {
+  sc_v_t1 = ((sc_lget_5_0((sc_a_node + sc_v_raySignDX)) - sc_v_rayOX) * sc_v_invRayDX);
+  sc_v_ty0 = ((sc_lget_5_1((sc_a_node + sc_v_raySignDY)) - sc_v_rayOY) * sc_v_invRayDY);
+  if ((sc_v_ty0 > sc_v_t1)) {
     sc_v_hit = 0.0;
     return;
   }
-  if (((sc_v_ty0 > sc_v_t0) ? 1.0 : 0.0) != 0.0) {
+  if ((sc_v_ty0 > sc_v_t0)) {
     sc_v_t0 = sc_v_ty0;
   }
-  if (((sc_v_ty1 < sc_v_t1) ? 1.0 : 0.0) != 0.0) {
+  if ((sc_v_ty1 < sc_v_t1)) {
     sc_v_t1 = sc_v_ty1;
   }
-  sc_v_ty1 = (({
-  float len = sc_llen_5.z;
-  if (len <= 0.0) return 0.0;
-  float i = clamp(((sc_a_node + sc_v_raySignDZ)) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_5.x) + 0.5;
-  float y = sc_lmeta_5.z + floor(i / sc_lmeta_5.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-} - sc_v_rayOZ) * sc_v_invRayDZ);
-  if (((sc_v_t0 > sc_v_ty1) ? 1.0 : 0.0) != 0.0) {
+  sc_v_ty1 = ((sc_lget_5_2((sc_a_node + sc_v_raySignDZ)) - sc_v_rayOZ) * sc_v_invRayDZ);
+  if ((sc_v_t0 > sc_v_ty1)) {
     sc_v_hit = 0.0;
     return;
   }
-  sc_v_ty0 = (({
-  float len = sc_llen_5.w;
-  if (len <= 0.0) return 0.0;
-  float i = clamp(((sc_a_node + sc_v_raySignDZ)) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_5.x) + 0.5;
-  float y = sc_lmeta_5.z + floor(i / sc_lmeta_5.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-} - sc_v_rayOZ) * sc_v_invRayDZ);
-  if (((sc_v_ty0 > sc_v_t1) ? 1.0 : 0.0) != 0.0) {
+  sc_v_ty0 = ((sc_lget_5_3((sc_a_node + sc_v_raySignDZ)) - sc_v_rayOZ) * sc_v_invRayDZ);
+  if ((sc_v_ty0 > sc_v_t1)) {
     sc_v_hit = 0.0;
     return;
   }
-  if (((sc_v_ty0 > sc_v_t0) ? 1.0 : 0.0) != 0.0) {
+  if ((sc_v_ty0 > sc_v_t0)) {
     sc_v_t0 = sc_v_ty0;
   }
   sc_v_hit = ((((((((sc_v_ty1 + ((sc_v_t1 - sc_v_ty1) * ((sc_v_t1 < sc_v_ty1) ? 1.0 : 0.0))) < (sc_v_t0 * ((sc_v_t0 > 0.0) ? 1.0 : 0.0))) ? 1.0 : 0.0) == 0.0) ? 1.0 : 0.0) != 0.0 && ((sc_v_t0 < sc_v_hitT) ? 1.0 : 0.0) != 0.0) ? 1.0 : 0.0) + 0.0);
 }
 
 void sc_fn_intersectionTriangle_s(in float sc_a_node) {
-  sc_v_i = {
-  float len = sc_llen_6.w;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_a_node) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_6.x) + 0.5;
-  float y = sc_lmeta_6.z + floor(i / sc_lmeta_6.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-};
+  sc_v_i = sc_lget_6_3(sc_a_node);
   for (int sc_i_i_0 = 0; sc_i_i_0 < 256; sc_i_i_0++) {
-    if (float(sc_i_i_0) >= {
-  float len = sc_llen_6.x;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_a_node) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_6.x) + 0.5;
-  float y = sc_lmeta_6.z + floor(i / sc_lmeta_6.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-}) break;
-    sc_v_j = {
-  float len = sc_llen_7.x;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_i) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_7.x) + 0.5;
-  float y = sc_lmeta_7.z + floor(i / sc_lmeta_7.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-};
-    sc_v_nx = {
-  float len = sc_llen_7.y;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_j) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_7.x) + 0.5;
-  float y = sc_lmeta_7.z + floor(i / sc_lmeta_7.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-};
-    sc_v_ny = {
-  float len = sc_llen_7.z;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_j) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_7.x) + 0.5;
-  float y = sc_lmeta_7.z + floor(i / sc_lmeta_7.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-};
-    sc_v_nz = {
-  float len = sc_llen_7.w;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_j) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_7.x) + 0.5;
-  float y = sc_lmeta_7.z + floor(i / sc_lmeta_7.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-};
+    if (float(sc_i_i_0) >= sc_lget_6_0(sc_a_node)) break;
+    sc_v_j = sc_lget_7_0(sc_v_i);
+    sc_v_nx = sc_lget_7_1(sc_v_j);
+    sc_v_ny = sc_lget_7_2(sc_v_j);
+    sc_v_nz = sc_lget_7_3(sc_v_j);
     sc_v_den = ((sc_v_nx * sc_v_rayDX) + ((sc_v_ny * sc_v_rayDY) + (sc_v_nz * sc_v_rayDZ)));
-    sc_v_t = ((sc_v_den == 0.0) ? 1e20 : ((0.0 - ((sc_v_nx * sc_v_rayOX) + ((sc_v_ny * sc_v_rayOY) + ((sc_v_nz * sc_v_rayOZ) + {
-  float len = sc_llen_8.x;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_j) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_8.x) + 0.5;
-  float y = sc_lmeta_8.z + floor(i / sc_lmeta_8.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-})))) / sc_v_den));
-    if (((((sc_v_t < sc_v_hitT) ? 1.0 : 0.0) != 0.0 && ((sc_v_t > 1e-8) ? 1.0 : 0.0) != 0.0) ? 1.0 : 0.0) != 0.0) {
+    sc_v_t = ((sc_v_den == 0.0) ? 1e20 : ((0.0 - ((sc_v_nx * sc_v_rayOX) + ((sc_v_ny * sc_v_rayOY) + ((sc_v_nz * sc_v_rayOZ) + sc_lget_8_0(sc_v_j))))) / sc_v_den));
+    if (((sc_v_t < sc_v_hitT) && (sc_v_t > 1e-8))) {
       sc_v_px = (sc_v_rayOX + (sc_v_rayDX * sc_v_t));
       sc_v_py = (sc_v_rayOY + (sc_v_rayDY * sc_v_t));
       sc_v_pz = (sc_v_rayOZ + (sc_v_rayDZ * sc_v_t));
-      sc_v_x0 = (sc_v_px - {
-  float len = sc_llen_8.y;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_j) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_8.x) + 0.5;
-  float y = sc_lmeta_8.z + floor(i / sc_lmeta_8.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-});
-      sc_v_y0 = (sc_v_py - {
-  float len = sc_llen_8.z;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_j) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_8.x) + 0.5;
-  float y = sc_lmeta_8.z + floor(i / sc_lmeta_8.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-});
-      sc_v_z0 = (sc_v_pz - {
-  float len = sc_llen_8.w;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_j) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_8.x) + 0.5;
-  float y = sc_lmeta_8.z + floor(i / sc_lmeta_8.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-});
-      sc_v_u = ((sc_v_x0 * {
-  float len = sc_llen_9.x;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_j) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_9.x) + 0.5;
-  float y = sc_lmeta_9.z + floor(i / sc_lmeta_9.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-}) + ((sc_v_y0 * {
-  float len = sc_llen_9.y;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_j) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_9.x) + 0.5;
-  float y = sc_lmeta_9.z + floor(i / sc_lmeta_9.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-}) + (sc_v_z0 * {
-  float len = sc_llen_9.z;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_j) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_9.x) + 0.5;
-  float y = sc_lmeta_9.z + floor(i / sc_lmeta_9.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-})));
-      if (((((sc_v_u < 0.0) ? 1.0 : 0.0) == 0.0) ? 1.0 : 0.0) != 0.0) {
-        sc_v_v = ((sc_v_x0 * {
-  float len = sc_llen_9.w;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_j) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_9.x) + 0.5;
-  float y = sc_lmeta_9.z + floor(i / sc_lmeta_9.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-}) + ((sc_v_y0 * {
-  float len = sc_llen_10.x;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_j) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_10.x) + 0.5;
-  float y = sc_lmeta_10.z + floor(i / sc_lmeta_10.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-}) + (sc_v_z0 * {
-  float len = sc_llen_10.y;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_j) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_10.x) + 0.5;
-  float y = sc_lmeta_10.z + floor(i / sc_lmeta_10.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-})));
-        if (((((((sc_v_v < 0.0) ? 1.0 : 0.0) != 0.0 || (((sc_v_u + sc_v_v) > 1.0) ? 1.0 : 0.0) != 0.0) ? 1.0 : 0.0) == 0.0) ? 1.0 : 0.0) != 0.0) {
+      sc_v_x0 = (sc_v_px - sc_lget_8_1(sc_v_j));
+      sc_v_y0 = (sc_v_py - sc_lget_8_2(sc_v_j));
+      sc_v_z0 = (sc_v_pz - sc_lget_8_3(sc_v_j));
+      sc_v_u = ((sc_v_x0 * sc_lget_9_0(sc_v_j)) + ((sc_v_y0 * sc_lget_9_1(sc_v_j)) + (sc_v_z0 * sc_lget_9_2(sc_v_j))));
+      if ((!((sc_v_u < 0.0)))) {
+        sc_v_v = ((sc_v_x0 * sc_lget_9_3(sc_v_j)) + ((sc_v_y0 * sc_lget_10_0(sc_v_j)) + (sc_v_z0 * sc_lget_10_1(sc_v_j))));
+        if ((!(((sc_v_v < 0.0) || ((sc_v_u + sc_v_v) > 1.0))))) {
           sc_v_hitT = sc_v_t;
           sc_v_hitTri = sc_v_j;
           sc_v_ix = sc_v_px;
@@ -895,41 +710,19 @@ void sc_fn_intersectionTriangle_s(in float sc_a_node) {
 }
 
 void sc_fn_traverse_s(in float sc_a_node) {
-  sc_len_stack = 0.0;
   sc_fn_intersectionAABB_s(sc_a_node);
-  if (((abs(sc_v_hit - 1.0) < 0.000001) ? 1.0 : 0.0) != 0.0) {
+  if ((abs(sc_v_hit - 1.0) < 0.000001)) {
     sc_v_lt = sc_v_t0;
-    if ((({
-  float len = sc_llen_6.x;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_a_node) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_6.x) + 0.5;
-  float y = sc_lmeta_6.z + floor(i / sc_lmeta_6.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-} > 0.0) ? 1.0 : 0.0) != 0.0) {
+    if ((sc_lget_6_0(sc_a_node) > 0.0)) {
       sc_fn_intersectionTriangle_s(sc_a_node);
       return;
     } else {
-      sc_v_left = {
-  float len = sc_llen_6.y;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_a_node) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_6.x) + 0.5;
-  float y = sc_lmeta_6.z + floor(i / sc_lmeta_6.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-};
-      sc_v_right = {
-  float len = sc_llen_6.z;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_a_node) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_6.x) + 0.5;
-  float y = sc_lmeta_6.z + floor(i / sc_lmeta_6.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-};
+      sc_v_left = sc_lget_6_1(sc_a_node);
+      sc_v_right = sc_lget_6_2(sc_a_node);
       sc_fn_intersectionAABB_s(sc_v_left);
-      if (((abs(sc_v_hit - 0.0) < 0.000001) ? 1.0 : 0.0) != 0.0) {
+      if ((abs(sc_v_hit - 0.0) < 0.000001)) {
         sc_fn_intersectionAABB_s(sc_v_right);
-        if (((abs(sc_v_hit - 0.0) < 0.000001) ? 1.0 : 0.0) != 0.0) {
+        if ((abs(sc_v_hit - 0.0) < 0.000001)) {
           return;
         } else {
           sc_v_node = sc_v_right;
@@ -938,31 +731,35 @@ void sc_fn_traverse_s(in float sc_a_node) {
       } else {
         sc_v_lt = sc_v_t0;
         sc_fn_intersectionAABB_s(sc_v_right);
-        if (((abs(sc_v_hit - 0.0) < 0.000001) ? 1.0 : 0.0) != 0.0) {
+        if ((abs(sc_v_hit - 0.0) < 0.000001)) {
           sc_v_node = sc_v_left;
           sc_v_ptr = 1.0;
         } else {
-          if (((sc_v_lt < sc_v_t0) ? 1.0 : 0.0) != 0.0) {
-            for (int sc_i_i_1 = 0; sc_i_i_1 < 1024; sc_i_i_1++) {
+          if ((sc_v_lt < sc_v_t0)) {
+            for (int sc_i_i_1 = 0; sc_i_i_1 < 256; sc_i_i_1++) {
               float ci = float(sc_i_i_1 + 1);
               float sc_i_i_2 = floor(1.0 + 0.5);
               if (ci == sc_i_i_2 && 1.0 >= 1.0 && 1.0 <= sc_len_stack) {
                 sc_la_stack[sc_i_i_1] = sc_v_right;
-              } else if (ci == sc_len_stack + 1.0 && ci <= float(1024) && sc_i_i_2 == ci) {
+                break;
+              } else if (ci == sc_len_stack + 1.0 && ci <= float(256) && sc_i_i_2 == ci) {
                 sc_la_stack[sc_i_i_1] = sc_v_right;
                 sc_len_stack = sc_len_stack + 1.0;
+                break;
               }
             }
             sc_v_node = sc_v_left;
           } else {
-            for (int sc_i_i_3 = 0; sc_i_i_3 < 1024; sc_i_i_3++) {
+            for (int sc_i_i_3 = 0; sc_i_i_3 < 256; sc_i_i_3++) {
               float ci = float(sc_i_i_3 + 1);
               float sc_i_i_4 = floor(1.0 + 0.5);
               if (ci == sc_i_i_4 && 1.0 >= 1.0 && 1.0 <= sc_len_stack) {
                 sc_la_stack[sc_i_i_3] = sc_v_left;
-              } else if (ci == sc_len_stack + 1.0 && ci <= float(1024) && sc_i_i_4 == ci) {
+                break;
+              } else if (ci == sc_len_stack + 1.0 && ci <= float(256) && sc_i_i_4 == ci) {
                 sc_la_stack[sc_i_i_3] = sc_v_left;
                 sc_len_stack = sc_len_stack + 1.0;
+                break;
               }
             }
             sc_v_node = sc_v_right;
@@ -971,44 +768,23 @@ void sc_fn_traverse_s(in float sc_a_node) {
         }
       }
     }
-    for (int sc_i_i_9 = 0; sc_i_i_9 < 4096; sc_i_i_9++) {
-      if ((({
-  float len = sc_llen_6.x;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_node) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_6.x) + 0.5;
-  float y = sc_lmeta_6.z + floor(i / sc_lmeta_6.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-} > 0.0) ? 1.0 : 0.0) != 0.0) {
+    for (int sc_i_i_9 = 0; sc_i_i_9 < 256; sc_i_i_9++) {
+      if ((sc_lget_6_0(sc_v_node) > 0.0)) {
         sc_fn_intersectionTriangle_s(sc_v_node);
         sc_v_ptr += -1.0;
-        if (((abs(sc_v_ptr - 0.0) < 0.000001) ? 1.0 : 0.0) != 0.0) {
+        if ((abs(sc_v_ptr - 0.0) < 0.000001)) {
           return;
         }
         sc_v_node = sc_laget_stack(sc_v_ptr);
       } else {
-        sc_v_left = {
-  float len = sc_llen_6.y;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_node) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_6.x) + 0.5;
-  float y = sc_lmeta_6.z + floor(i / sc_lmeta_6.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-};
-        sc_v_right = {
-  float len = sc_llen_6.z;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_node) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_6.x) + 0.5;
-  float y = sc_lmeta_6.z + floor(i / sc_lmeta_6.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-};
+        sc_v_left = sc_lget_6_1(sc_v_node);
+        sc_v_right = sc_lget_6_2(sc_v_node);
         sc_fn_intersectionAABB_s(sc_v_left);
-        if (((abs(sc_v_hit - 0.0) < 0.000001) ? 1.0 : 0.0) != 0.0) {
+        if ((abs(sc_v_hit - 0.0) < 0.000001)) {
           sc_fn_intersectionAABB_s(sc_v_right);
-          if (((abs(sc_v_hit - 0.0) < 0.000001) ? 1.0 : 0.0) != 0.0) {
+          if ((abs(sc_v_hit - 0.0) < 0.000001)) {
             sc_v_ptr += -1.0;
-            if (((abs(sc_v_ptr - 0.0) < 0.000001) ? 1.0 : 0.0) != 0.0) {
+            if ((abs(sc_v_ptr - 0.0) < 0.000001)) {
               return;
             }
             sc_v_node = sc_laget_stack(sc_v_ptr);
@@ -1018,30 +794,34 @@ void sc_fn_traverse_s(in float sc_a_node) {
         } else {
           sc_v_lt = sc_v_t0;
           sc_fn_intersectionAABB_s(sc_v_right);
-          if (((abs(sc_v_hit - 0.0) < 0.000001) ? 1.0 : 0.0) != 0.0) {
+          if ((abs(sc_v_hit - 0.0) < 0.000001)) {
             sc_v_node = sc_v_left;
           } else {
-            if (((sc_v_lt < sc_v_t0) ? 1.0 : 0.0) != 0.0) {
-              for (int sc_i_i_5 = 0; sc_i_i_5 < 1024; sc_i_i_5++) {
+            if ((sc_v_lt < sc_v_t0)) {
+              for (int sc_i_i_5 = 0; sc_i_i_5 < 256; sc_i_i_5++) {
                 float ci = float(sc_i_i_5 + 1);
                 float sc_i_i_6 = floor(sc_v_ptr + 0.5);
                 if (ci == sc_i_i_6 && sc_v_ptr >= 1.0 && sc_v_ptr <= sc_len_stack) {
                   sc_la_stack[sc_i_i_5] = sc_v_right;
-                } else if (ci == sc_len_stack + 1.0 && ci <= float(1024) && sc_i_i_6 == ci) {
+                  break;
+                } else if (ci == sc_len_stack + 1.0 && ci <= float(256) && sc_i_i_6 == ci) {
                   sc_la_stack[sc_i_i_5] = sc_v_right;
                   sc_len_stack = sc_len_stack + 1.0;
+                  break;
                 }
               }
               sc_v_node = sc_v_left;
             } else {
-              for (int sc_i_i_7 = 0; sc_i_i_7 < 1024; sc_i_i_7++) {
+              for (int sc_i_i_7 = 0; sc_i_i_7 < 256; sc_i_i_7++) {
                 float ci = float(sc_i_i_7 + 1);
                 float sc_i_i_8 = floor(sc_v_ptr + 0.5);
                 if (ci == sc_i_i_8 && sc_v_ptr >= 1.0 && sc_v_ptr <= sc_len_stack) {
                   sc_la_stack[sc_i_i_7] = sc_v_left;
-                } else if (ci == sc_len_stack + 1.0 && ci <= float(1024) && sc_i_i_8 == ci) {
+                  break;
+                } else if (ci == sc_len_stack + 1.0 && ci <= float(256) && sc_i_i_8 == ci) {
                   sc_la_stack[sc_i_i_7] = sc_v_left;
                   sc_len_stack = sc_len_stack + 1.0;
+                  break;
                 }
               }
               sc_v_node = sc_v_right;
@@ -1070,149 +850,23 @@ void sc_fn_castRay_s_s_s_dir_s_s_s_dist_s(in float sc_a_ox, in float sc_a_oy, in
   sc_v_raySignDY = (0.0 + ((sc_v_rayDY < 0.0) ? 1.0 : 0.0));
   sc_v_raySignDZ = (0.0 + ((sc_v_rayDZ < 0.0) ? 1.0 : 0.0));
   sc_fn_traverse_s(1.0);
-  if (((sc_v_hitTri > 0.0) ? 1.0 : 0.0) != 0.0) {
+  if ((sc_v_hitTri > 0.0)) {
     sc_v_w = (1.0 - (sc_v_iu + sc_v_iv));
-    sc_fn_normalize_s_s_s(((sc_v_w * {
-  float len = sc_llen_0.x;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_0.x) + 0.5;
-  float y = sc_lmeta_0.z + floor(i / sc_lmeta_0.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-}) + ((sc_v_iu * {
-  float len = sc_llen_0.y;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_0.x) + 0.5;
-  float y = sc_lmeta_0.z + floor(i / sc_lmeta_0.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-}) + (sc_v_iv * {
-  float len = sc_llen_0.z;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_0.x) + 0.5;
-  float y = sc_lmeta_0.z + floor(i / sc_lmeta_0.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-}))), ((sc_v_w * {
-  float len = sc_llen_0.w;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_0.x) + 0.5;
-  float y = sc_lmeta_0.z + floor(i / sc_lmeta_0.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-}) + ((sc_v_iu * {
-  float len = sc_llen_1.x;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_1.x) + 0.5;
-  float y = sc_lmeta_1.z + floor(i / sc_lmeta_1.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-}) + (sc_v_iv * {
-  float len = sc_llen_1.y;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_1.x) + 0.5;
-  float y = sc_lmeta_1.z + floor(i / sc_lmeta_1.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-}))), ((sc_v_w * {
-  float len = sc_llen_1.z;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_1.x) + 0.5;
-  float y = sc_lmeta_1.z + floor(i / sc_lmeta_1.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-}) + ((sc_v_iu * {
-  float len = sc_llen_1.w;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_1.x) + 0.5;
-  float y = sc_lmeta_1.z + floor(i / sc_lmeta_1.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-}) + (sc_v_iv * {
-  float len = sc_llen_2.x;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_2.x) + 0.5;
-  float y = sc_lmeta_2.z + floor(i / sc_lmeta_2.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-}))));
+    sc_fn_normalize_s_s_s(((sc_v_w * sc_lget_0_0(sc_v_hitTri)) + ((sc_v_iu * sc_lget_0_1(sc_v_hitTri)) + (sc_v_iv * sc_lget_0_2(sc_v_hitTri)))), ((sc_v_w * sc_lget_0_3(sc_v_hitTri)) + ((sc_v_iu * sc_lget_1_0(sc_v_hitTri)) + (sc_v_iv * sc_lget_1_1(sc_v_hitTri)))), ((sc_v_w * sc_lget_1_2(sc_v_hitTri)) + ((sc_v_iu * sc_lget_1_3(sc_v_hitTri)) + (sc_v_iv * sc_lget_2_0(sc_v_hitTri)))));
     sc_v_inx = sc_v_vx;
     sc_v_iny = sc_v_vy;
     sc_v_inz = sc_v_vz;
-    sc_v_ir = {
-  float len = sc_llen_2.y;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_2.x) + 0.5;
-  float y = sc_lmeta_2.z + floor(i / sc_lmeta_2.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-};
-    sc_v_ig = {
-  float len = sc_llen_2.z;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_2.x) + 0.5;
-  float y = sc_lmeta_2.z + floor(i / sc_lmeta_2.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-};
-    sc_v_ib = {
-  float len = sc_llen_2.w;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_2.x) + 0.5;
-  float y = sc_lmeta_2.z + floor(i / sc_lmeta_2.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-};
-    sc_v_er = {
-  float len = sc_llen_3.x;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_3.x) + 0.5;
-  float y = sc_lmeta_3.z + floor(i / sc_lmeta_3.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-};
-    sc_v_eg = {
-  float len = sc_llen_3.y;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_3.x) + 0.5;
-  float y = sc_lmeta_3.z + floor(i / sc_lmeta_3.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-};
-    sc_v_eb = {
-  float len = sc_llen_3.z;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_3.x) + 0.5;
-  float y = sc_lmeta_3.z + floor(i / sc_lmeta_3.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).z;
-};
-    sc_v_ior = {
-  float len = sc_llen_3.w;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_3.x) + 0.5;
-  float y = sc_lmeta_3.z + floor(i / sc_lmeta_3.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).w;
-};
-    sc_v_rough = {
-  float len = sc_llen_4.x;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_4.x) + 0.5;
-  float y = sc_lmeta_4.z + floor(i / sc_lmeta_4.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).x;
-};
-    sc_v_id = {
-  float len = sc_llen_4.y;
-  if (len <= 0.0) return 0.0;
-  float i = clamp((sc_v_hitTri) - 1.0, 0.0, len - 1.0);
-  float x = mod(i, sc_lmeta_4.x) + 0.5;
-  float y = sc_lmeta_4.z + floor(i / sc_lmeta_4.x) + 0.5;
-  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).y;
-};
-    if (((abs(sc_v_id - 1.0) < 0.000001) ? 1.0 : 0.0) != 0.0) {
-      sc_fn_hsv2rgb_s_s_s(((360.0 == 0.0) ? 1e20 : (((360.0 == 0.0) ? 0.0 : mod((atan(((sc_v_iz == 0.0) ? 1e20 : (sc_v_ix / sc_v_iz))) * 57.29577951308232 + (((((sc_v_iz > 0.0) ? 1.0 : 0.0) == 0.0) ? 1.0 : 0.0) * 180.0)), 360.0)) / 360.0)), 0.8, 1.0);
+    sc_v_ir = sc_lget_2_1(sc_v_hitTri);
+    sc_v_ig = sc_lget_2_2(sc_v_hitTri);
+    sc_v_ib = sc_lget_2_3(sc_v_hitTri);
+    sc_v_er = sc_lget_3_0(sc_v_hitTri);
+    sc_v_eg = sc_lget_3_1(sc_v_hitTri);
+    sc_v_eb = sc_lget_3_2(sc_v_hitTri);
+    sc_v_ior = sc_lget_3_3(sc_v_hitTri);
+    sc_v_rough = sc_lget_4_0(sc_v_hitTri);
+    sc_v_id = sc_lget_4_1(sc_v_hitTri);
+    if ((abs(sc_v_id - 1.0) < 0.000001)) {
+      sc_fn_hsv2rgb_s_s_s((mod((atan(((sc_v_iz == 0.0) ? 1e20 : (sc_v_ix / sc_v_iz))) * 57.29577951308232 + (((((sc_v_iz > 0.0) ? 1.0 : 0.0) == 0.0) ? 1.0 : 0.0) * 180.0)), 360.0) / 360.0), 0.8, 1.0);
       sc_v_ir = sc_v_cr;
       sc_v_ig = sc_v_cg;
       sc_v_ib = sc_v_cb;
@@ -1227,7 +881,7 @@ void sc_fn_diffuse_s_s_s(in float sc_a_nx, in float sc_a_ny, in float sc_a_nz) {
   sc_v_x = (sc_v_r * cos((sc_v_theta) * 0.017453292519943295));
   sc_v_y = (sc_v_r * sin((sc_v_theta) * 0.017453292519943295));
   sc_v_z = sqrt((1.0 - sc_v_u));
-  if (((abs(sc_v_inx) > 0.1) ? 1.0 : 0.0) != 0.0) {
+  if ((abs(sc_v_inx) > 0.1)) {
     sc_v_tx = sc_a_nz;
     sc_v_ty = 0.0;
     sc_v_tz = (0.0 - sc_a_nx);
@@ -1261,8 +915,8 @@ void sc_fn_pathtrace_s_s_s_s_s_s(in float sc_a_ox, in float sc_a_oy, in float sc
   sc_v_rayB = 1.0;
   for (int sc_i_i_10 = 0; sc_i_i_10 < 256; sc_i_i_10++) {
     if (float(sc_i_i_10) >= sc_v_maxBounces) break;
-    sc_fn_castRay_s_s_s_dir_s_s_s_dist_s(sc_v_currOX, sc_v_currOY, sc_v_currOZ, sc_v_currDX, sc_v_currDY, sc_v_currDZ, 1e20);
-    if (((abs(sc_v_hitTri - 0.0) < 0.000001) ? 1.0 : 0.0) != 0.0) {
+    sc_fn_castRay_s_s_s_dir_s_s_s_dist_s(sc_v_currOX, sc_v_currOY, sc_v_currOZ, sc_v_currDX, sc_v_currDY, sc_v_currDZ, 0.0);
+    if ((abs(sc_v_hitTri - 0.0) < 0.000001)) {
       return;
     }
     sc_v_sample_r += (sc_v_er * sc_v_rayR);
@@ -1309,7 +963,7 @@ void sc_fn_pixel_s_s(in float sc_a_x, in float sc_a_y) {
 
 void main() {
   sc_len_stack = 0.0;
-  for (int sc_i_i_12 = 0; sc_i_i_12 < 1024; sc_i_i_12++) { sc_la_stack[sc_i_i_12] = 0.0; }
+  for (int sc_i_i_12 = 0; sc_i_i_12 < 256; sc_i_i_12++) { sc_la_stack[sc_i_i_12] = 0.0; }
   sc_v_c = 0.8;
   sc_v_x = 0.5890752239945691;
   sc_v_m = 0.19999999999999996;

@@ -1,12 +1,5 @@
 const PIXEL_NAME = 'pixel';
 const MAX_LOOP = 256;
-// A `forever` block in Scratch is unwound into a `for` loop with this
-// upper bound. The BVH traversal is itself a `forever`, so this must be
-// large enough to finish visiting every node the BVH might emit before
-// a hit. 64 was not enough for the uow5 BVH (which can legitimately
-// push dozens of nodes onto the stack) and silently truncated the
-// traversal, leaving whole regions of the scene unlit.
-const MAX_FOREVER = 4096;
 const MAX_UNROLL = 128;
 const SUBSTACK_INPUTS = new Set(['SUBSTACK', 'SUBSTACK2', 'SUBSTACK3']);
 
@@ -60,7 +53,6 @@ export class ScratchShaderCompiler {
     this._listInitialLengths = new Map();
     this._globalMutableArrays = [];
     this._mutableReaderName = new Map();
-    this._proceduresUsingStack = new Set();
   }
 
   _uid (logical, prefix) {
@@ -379,11 +371,6 @@ export class ScratchShaderCompiler {
       });
     }
     this._collectMutableLists();
-    for (const [code, info] of this._procedures) {
-      if (this._procedureWritesMutableList(info)) {
-        this._proceduresUsingStack.add(code);
-      }
-    }
   }
 
   _collectMutableLists () {
@@ -396,7 +383,7 @@ export class ScratchShaderCompiler {
     // demand, so we have to over-provision the shader's fixed-size array
     // to keep the two executions in lock-step. 1024 covers any BVH that
     // fits in a 480x360 stage without degenerating into a linked list.
-    const MUTABLE_CAP_DEFAULT = 1024;
+    const MUTABLE_CAP_DEFAULT = 256;
     const MUTABLE_CAP_MAX = 1024;
     this._collectListInitialLengths();
     this._mutableListNames = new Set();
@@ -410,20 +397,6 @@ export class ScratchShaderCompiler {
         this._mutableListSizes.set(name, cap);
       }
     }
-  }
-
-  _procedureWritesMutableList (info) {
-    let found = false;
-    this._walkAll(info.bodyHead, info.blocks, (b) => {
-      if (found) return;
-      if (b.opcode === 'data_replaceitemoflist' || b.opcode === 'data_addtolist' || b.opcode === 'data_insertatlist' || b.opcode === 'data_deleteoflist' || b.opcode === 'data_deletealloflist') {
-        const name = this._getField(b, 'LIST');
-        if (name && this._mutableListNames && this._mutableListNames.has(name)) {
-          found = true;
-        }
-      }
-    });
-    return found;
   }
 
   _generateVertex () {
@@ -513,7 +486,7 @@ export class ScratchShaderCompiler {
         lines.push(`  float gi = clamp(idx - 1.0, 0.0, ${len} - 1.0);`);
         lines.push(`  float result = 0.0;`);
         lines.push(`  for (int mi = 0; mi < ${cap}; mi++) {`);
-        lines.push(`    if (float(mi) == gi) result = ${arr}[mi];`);
+        lines.push(`    if (float(mi) == gi) { result = ${arr}[mi]; break; }`);
         lines.push(`  }`);
         lines.push(`  return result;`);
         lines.push(`}`);
@@ -653,16 +626,6 @@ export class ScratchShaderCompiler {
     for (const p of info.paramNames) {
       this._scope.set(String(p), this._uid(p, 'sc_a_'));
     }
-    // Per-ray mutable list(s) act as global scratch space shared across calls.
-    // Any procedure that writes to one must start with a clean length to avoid
-    // inheriting leftover state from a previous invocation (e.g. the BVH
-    // traversal "stack" leaking between bounces in a path tracer).
-    if (this._proceduresUsingStack && this._proceduresUsingStack.has(code)) {
-      for (const name of this._mutableListNames) {
-        const len = this._mutableLenName(name);
-        lines.push(`  ${len} = 0.0;`);
-      }
-    }
     const body = this._stmts(info.bodyHead, '  ');
     if (body) lines.push(body);
     if (info.isReporter) {
@@ -707,15 +670,15 @@ export class ScratchShaderCompiler {
         return `${ind}${this._varTarget(name)} += ${val};`;
       }
       case 'control_if': {
-        const cond = this._inputExpr(b, 'CONDITION');
+        const cond = this._condExpr(b, 'CONDITION');
         const body = this._substack(b, 'SUBSTACK', ind + '  ');
-        return `${ind}if (${cond} != 0.0) {\n${body}\n${ind}}`;
+        return `${ind}if (${cond}) {\n${body}\n${ind}}`;
       }
       case 'control_if_else': {
-        const cond = this._inputExpr(b, 'CONDITION');
+        const cond = this._condExpr(b, 'CONDITION');
         const body1 = this._substack(b, 'SUBSTACK', ind + '  ');
         const body2 = this._substack(b, 'SUBSTACK2', ind + '  ');
-        return `${ind}if (${cond} != 0.0) {\n${body1}\n${ind}} else {\n${body2}\n${ind}}`;
+        return `${ind}if (${cond}) {\n${body1}\n${ind}} else {\n${body2}\n${ind}}`;
       }
       case 'control_repeat': {
         const times = this._inputExpr(b, 'TIMES');
@@ -730,16 +693,16 @@ export class ScratchShaderCompiler {
         return `${ind}for (int ${lv} = 0; ${lv} < ${MAX_LOOP}; ${lv}++) {\n${ind}  if (float(${lv}) >= ${times}) break;\n${body}\n${ind}}`;
       }
       case 'control_repeat_until': {
-        const cond = this._inputExpr(b, 'CONDITION');
+        const cond = this._condExpr(b, 'CONDITION');
         const body = this._substack(b, 'SUBSTACK', ind + '  ');
         const lv = this._loopVar();
-        return `${ind}for (int ${lv} = 0; ${lv} < ${MAX_LOOP}; ${lv}++) {\n${ind}  if (${cond} != 0.0) break;\n${body}\n${ind}}`;
+        return `${ind}for (int ${lv} = 0; ${lv} < ${MAX_LOOP}; ${lv}++) {\n${ind}  if (${cond}) break;\n${body}\n${ind}}`;
       }
       case 'control_while': {
-        const cond = this._inputExpr(b, 'CONDITION');
+        const cond = this._condExpr(b, 'CONDITION');
         const body = this._substack(b, 'SUBSTACK', ind + '  ');
         const lv = this._loopVar();
-        return `${ind}for (int ${lv} = 0; ${lv} < ${MAX_LOOP}; ${lv}++) {\n${ind}  if (${cond} == 0.0) break;\n${body}\n${ind}}`;
+        return `${ind}for (int ${lv} = 0; ${lv} < ${MAX_LOOP}; ${lv}++) {\n${ind}  if (!(${cond})) break;\n${body}\n${ind}}`;
       }
       case 'control_for_each': {
         const name = this._getField(b, 'VARIABLE');
@@ -781,15 +744,9 @@ export class ScratchShaderCompiler {
         return `${ind}return;`;
       }
       case 'control_forever': {
-        // "forever" has no exit condition in Scratch; in the shader we bound it
-        // to a fixed iteration count. The loop body typically exits via
-        // "control_stop (this script)" which compiles to `return;`, terminating
-        // the whole function (and thus the loop) early. Forever loops in
-        // particular can be very heavy on a GPU, so we use a smaller bound
-        // (MAX_FOREVER) than for ordinary repeat/while loops.
         const foreverBody = this._substack(b, 'SUBSTACK', ind + '  ');
         const fv = this._loopVar();
-        return `${ind}for (int ${fv} = 0; ${fv} < ${MAX_FOREVER}; ${fv}++) {\n${foreverBody}\n${ind}}`;
+        return `${ind}for (int ${fv} = 0; ${fv} < ${MAX_LOOP}; ${fv}++) {\n${foreverBody}\n${ind}}`;
       }
       case 'control_wait':
       case 'control_wait_until':
@@ -822,9 +779,11 @@ export class ScratchShaderCompiler {
           `${ind}  float ${ridx} = floor(${idx} + 0.5);`,
           `${ind}  if (ci == ${ridx} && ${idx} >= 1.0 && ${idx} <= ${len}) {`,
           `${ind}    ${arr}[${iv}] = ${val};`,
+          `${ind}    break;`,
           `${ind}  } else if (ci == ${len} + 1.0 && ci <= float(${cap}) && ${ridx} == ci) {`,
           `${ind}    ${arr}[${iv}] = ${val};`,
           `${ind}    ${len} = ${len} + 1.0;`,
+          `${ind}    break;`,
           `${ind}  }`,
           `${ind}}`
         ].join('\n');
@@ -912,40 +871,56 @@ export class ScratchShaderCompiler {
     return null;
   }
 
+  _literalValue (block, inputName) {
+    const input = block.inputs && block.inputs[inputName];
+    if (!input) return null;
+    const childId = this._inputChild(input);
+    if (!childId) return null;
+    const b = this._block(childId);
+    if (!b) return null;
+    if (['math_number', 'math_positive_number', 'math_whole_number', 'math_integer', 'math_angle'].includes(b.opcode)) {
+      return parseNum(this._getField(b, 'NUM'));
+    }
+    if (b.opcode === 'text') {
+      return parseNum(this._getField(b, 'TEXT'));
+    }
+    return null;
+  }
+
   _inputExpr (block, inputName) {
     const input = block.inputs && block.inputs[inputName];
     const childId = this._inputChild(input);
-    if (!childId) {
-      if (this._isDistanceArgument(block, inputName)) return '1e20';
-      return '0.0';
-    }
-    if (this._isEmptyDistanceInput(block, inputName, input)) {
-      return '1e20';
-    }
+    if (!childId) return '0.0';
     return this._expr(childId);
   }
 
-  _isEmptyDistanceInput (block, inputName, input) {
-    if (!this._isDistanceArgument(block, inputName)) return false;
-    if (!input) return true;
-    const hasExplicitBlock = input.block !== null && input.block !== undefined && input.block !== input.shadow;
-    return !hasExplicitBlock;
-  }
-
-  _isDistanceArgument (block, inputName) {
-    if (!block || block.opcode !== 'procedures_call') return false;
-    if (!block.mutation || !block.mutation.argumentids) return false;
-    let ids;
-    try { ids = JSON.parse(block.mutation.argumentids); } catch (e) { return false; }
-    const idx = ids.indexOf(inputName);
-    if (idx < 0) return false;
-    const proccode = block.mutation.proccode;
-    if (!proccode || !this._procedures.has(proccode)) return false;
-    const info = this._procedures.get(proccode);
-    const name = info.paramNames && info.paramNames[idx];
-    if (!name) return false;
-    const lower = String(name).toLowerCase();
-    return lower === 'dist' || lower === 'distance';
+  _condExpr (block, inputName) {
+    const input = block.inputs && block.inputs[inputName];
+    const childId = this._inputChild(input);
+    if (!childId) {
+      return `(${this._inputExpr(block, inputName)} != 0.0)`;
+    }
+    const b = this._block(childId);
+    if (!b) {
+      return `(${this._inputExpr(block, inputName)} != 0.0)`;
+    }
+    const op = b.opcode;
+    switch (op) {
+      case 'operator_lt':
+        return `(${this._inputExpr(b, 'OPERAND1')} < ${this._inputExpr(b, 'OPERAND2')})`;
+      case 'operator_gt':
+        return `(${this._inputExpr(b, 'OPERAND1')} > ${this._inputExpr(b, 'OPERAND2')})`;
+      case 'operator_equals':
+        return `(abs(${this._inputExpr(b, 'OPERAND1')} - ${this._inputExpr(b, 'OPERAND2')}) < 0.000001)`;
+      case 'operator_and':
+        return `(${this._condExpr(b, 'OPERAND1')} && ${this._condExpr(b, 'OPERAND2')})`;
+      case 'operator_or':
+        return `(${this._condExpr(b, 'OPERAND1')} || ${this._condExpr(b, 'OPERAND2')})`;
+      case 'operator_not':
+        return `(!(${this._condExpr(b, 'OPERAND')}))`;
+      default:
+        return `(${this._inputExpr(block, inputName)} != 0.0)`;
+    }
   }
 
   _expr (blockId) {
@@ -987,19 +962,19 @@ export class ScratchShaderCompiler {
       case 'operator_divide': {
         const a = this._inputExpr(b, 'NUM1');
         const d = this._inputExpr(b, 'NUM2');
-        // Scratch's `1 / 0` is `Infinity`, but `1.0 / 0.0` in GLSL ES 1.00
-        // is undefined behavior. Returning `0.0` was tempting but it broke
-        // the BVH slab test: when `rayDX == 0`, the X slab's
-        // `t_near` and `t_far` both collapsed to `0 * (boundary - ox) = 0`,
-        // so the combined slab test always reported a miss for any
-        // axis-aligned ray, hiding entire walls/regions of the scene.
-        // Returning `1e20` mimics Scratch's `Infinity` propagation, so
-        // `a * 1e20` then yields the correct ±Infinity for the slab test.
+        const dLit = this._literalValue(b, 'NUM2');
+        if (dLit !== null && dLit !== 0) {
+          return `(${a} / ${d})`;
+        }
         return `((${d} == 0.0) ? 1e20 : (${a} / ${d}))`;
       }
       case 'operator_mod': {
         const a = this._inputExpr(b, 'NUM1');
         const d = this._inputExpr(b, 'NUM2');
+        const dLit = this._literalValue(b, 'NUM2');
+        if (dLit !== null && dLit !== 0) {
+          return `mod(${a}, ${d})`;
+        }
         return `((${d} == 0.0) ? 0.0 : mod(${a}, ${d}))`;
       }
       case 'operator_round':

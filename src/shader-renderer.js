@@ -35,6 +35,11 @@ class ShaderRenderer {
     this._glErrorCounts = {};
     this._maxGlErrorLog = 16;
     this._rafId = null;
+    this._glStateReady = false;
+    this._uniformCache = null;
+    this._readVariableCache = () => ({});
+    this._listDataCache = null;
+    this._listDataSig = null;
   }
 
   getGlErrors () {
@@ -62,6 +67,8 @@ class ShaderRenderer {
     const gl = this.gl;
     this._compiled = compiled;
     if (readVariable) this._readVariable = readVariable;
+    this._glStateReady = false;
+    this._uniformCache = null;
     const program = this._link(compiled.vertexSource, compiled.fragmentSource);
     if (!program) return false;
     if (this._program) this.gl.deleteProgram(this._program);
@@ -84,6 +91,13 @@ class ShaderRenderer {
     this._prepareListLocations(compiled);
     gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
     gl.bufferData(gl.ARRAY_BUFFER, QUAD, gl.STATIC_DRAW);
+    gl.useProgram(this._program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    this._glStateReady = true;
     return true;
   }
 
@@ -97,10 +111,12 @@ class ShaderRenderer {
     const listSpecs = this._compiled.listTextures;
     const maxTexIndex = listSpecs.reduce((m, s) => Math.max(m, s.texIndex), -1);
     const numPacks = maxTexIndex + 1;
-    this._destroyListTextures();
-    this._listPackInfo = new Array(numPacks).fill(null);
-    if (!numPacks) return;
+    if (!numPacks) {
+      this._destroyListTextures();
+      return;
+    }
     let maxLen = 1;
+    const packInfo = new Array(numPacks).fill(null);
     for (let pi = 0; pi < numPacks; pi++) {
       const channels = [null, null, null, null];
       for (const spec of listSpecs) {
@@ -110,9 +126,75 @@ class ShaderRenderer {
         channels[spec.channel] = { name: spec.scratchName, data };
         if (data.length > maxLen) maxLen = data.length;
       }
-      this._listPackInfo[pi] = channels;
+      packInfo[pi] = channels;
     }
-    this._createListAtlas(this._listPackInfo, maxLen);
+    this._listPackInfo = packInfo;
+    const existing = this._listTextures[0];
+    if (existing && existing.width === Math.min(maxLen, MAX_TEX_SIZE)) {
+      this._updateListAtlasInPlace(existing, packInfo, maxLen);
+    } else {
+      this._destroyListTextures();
+      this._createListAtlas(packInfo, maxLen);
+    }
+  }
+
+  _updateListAtlasInPlace (atlas, packs, maxLen) {
+    const gl = this.gl;
+    const width = atlas.width;
+    const packHeights = packs.map((channels) => {
+      let len = 1;
+      for (const ch of channels) {
+        if (ch && ch.data.length > len) len = ch.data.length;
+      }
+      return Math.max(1, Math.ceil(len / width));
+    });
+    let totalHeight = 0;
+    const offsets = [];
+    for (const h of packHeights) {
+      offsets.push(totalHeight);
+      totalHeight += h;
+    }
+    if (totalHeight !== atlas.height) {
+      this._destroyListTextures();
+      this._createListAtlas(packs, maxLen);
+      return;
+    }
+    const texels = width * totalHeight;
+    const buf = new Float32Array(texels * 4);
+    for (let pi = 0; pi < packs.length; pi++) {
+      const channels = packs[pi];
+      const yOffset = offsets[pi];
+      for (let c = 0; c < 4; c++) {
+        const ch = channels[c];
+        if (!ch) continue;
+        const data = ch.data;
+        const maxItems = width * packHeights[pi];
+        for (let i = 0; i < data.length && i < maxItems; i++) {
+          const x = i % width;
+          const y = yOffset + Math.floor(i / width);
+          buf[(y * width + x) * 4 + c] = data[i];
+        }
+      }
+    }
+    gl.bindTexture(gl.TEXTURE_2D, atlas.texture);
+    const type = this._texType;
+    let uploadBuf;
+    if (this._isFloat) {
+      uploadBuf = buf;
+    } else {
+      uploadBuf = new Uint8Array(texels * 4);
+      for (let i = 0; i < buf.length; i++) {
+        uploadBuf[i] = Math.max(0, Math.min(255, Math.round(buf[i])));
+      }
+    }
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, totalHeight, gl.RGBA, type, uploadBuf);
+    atlas.packs = packs.map((channels, pi) => {
+      const lengths = [0, 0, 0, 0];
+      for (let c = 0; c < 4; c++) {
+        if (channels[c]) lengths[c] = channels[c].data.length;
+      }
+      return { offset: offsets[pi], height: packHeights[pi], lengths };
+    });
   }
 
   _createListAtlas (packs, maxLen) {
@@ -290,14 +372,18 @@ class ShaderRenderer {
   render () {
     const gl = this.gl;
     if (!this._program) return;
-    gl.useProgram(this._program);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
-    gl.enableVertexAttribArray(this._locations.aPos);
-    gl.vertexAttribPointer(this._locations.aPos, 2, gl.FLOAT, false, 0, 0);
+    if (!this._glStateReady) {
+      gl.useProgram(this._program);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
+      gl.enableVertexAttribArray(this._locations.aPos);
+      gl.vertexAttribPointer(this._locations.aPos, 2, gl.FLOAT, false, 0, 0);
+      this._glStateReady = true;
+    }
     gl.uniform2f(this._locations.uResolution, this.canvas.width, this.canvas.height);
     gl.uniform1f(this._locations.uTime, this.getTime());
+    const cache = this._readVariableCache();
     for (const v of this._locations.vars) {
-      gl.uniform1f(v.loc, this._readVariable(v.name));
+      gl.uniform1f(v.loc, cache[v.name] !== undefined ? cache[v.name] : 0);
     }
     const atlas = this._listTextures[0];
     const atlasLoc = this._locations.listAtlas;
@@ -315,11 +401,15 @@ class ShaderRenderer {
         gl.uniform3f(loc.lmeta, atlas.width, pack.height, pack.offset);
       }
     }
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    this._checkGlError('render');
+  }
+
+  invalidateUniformCache () {
+    this._uniformCache = null;
+  }
+
+  setVariableCacheProvider (fn) {
+    this._readVariableCache = fn || (() => ({}));
   }
 
   _destroyListTextures () {

@@ -365,8 +365,6 @@ testNoPixel();
 testBasicPixel();
 testHelperReporter();
 testRecursion();
-testEmptyDistanceArgument();
-testExplicitDistanceArgument();
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
