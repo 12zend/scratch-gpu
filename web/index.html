@@ -217,6 +217,7 @@
     handleFile(file);
     // Reset so selecting the same file twice still fires change.
     fileInput.value = '';
+    fileInput.blur();
   });
 
   window.addEventListener('resize', () => s.relayout());
