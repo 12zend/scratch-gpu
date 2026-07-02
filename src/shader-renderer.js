@@ -39,7 +39,9 @@ class ShaderRenderer {
     this._uniformCache = null;
     this._readVariableCache = () => ({});
     this._listDataCache = null;
-    this._listDataSig = null;
+    this._lastVarVals = {};
+    this._lastW = -1;
+    this._lastH = -1;
   }
 
   getGlErrors () {
@@ -69,6 +71,9 @@ class ShaderRenderer {
     if (readVariable) this._readVariable = readVariable;
     this._glStateReady = false;
     this._uniformCache = null;
+    this._lastVarVals = {};
+    this._lastW = -1;
+    this._lastH = -1;
     const program = this._link(compiled.vertexSource, compiled.fragmentSource);
     if (!program) return false;
     if (this._program) this.gl.deleteProgram(this._program);
@@ -378,12 +383,26 @@ class ShaderRenderer {
       gl.enableVertexAttribArray(this._locations.aPos);
       gl.vertexAttribPointer(this._locations.aPos, 2, gl.FLOAT, false, 0, 0);
       this._glStateReady = true;
+      this._lastW = -1;
+      this._lastH = -1;
+      this._lastVarVals = {};
     }
-    gl.uniform2f(this._locations.uResolution, this.canvas.width, this.canvas.height);
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    if (this._lastW !== w || this._lastH !== h) {
+      gl.uniform2f(this._locations.uResolution, w, h);
+      gl.viewport(0, 0, w, h);
+      this._lastW = w;
+      this._lastH = h;
+    }
     gl.uniform1f(this._locations.uTime, this.getTime());
     const cache = this._readVariableCache();
     for (const v of this._locations.vars) {
-      gl.uniform1f(v.loc, cache[v.name] !== undefined ? cache[v.name] : 0);
+      const val = cache[v.name] !== undefined ? cache[v.name] : 0;
+      if (this._lastVarVals[v.name] !== val) {
+        gl.uniform1f(v.loc, val);
+        this._lastVarVals[v.name] = val;
+      }
     }
     const atlas = this._listTextures[0];
     const atlasLoc = this._locations.listAtlas;

@@ -17,6 +17,11 @@ class WebGPURenderer {
     this._readVariableCache = () => ({});
     this._listDataCache = null;
     this._uniformData = null;
+    this._lastW = -1;
+    this._lastH = -1;
+    this._lastTime = -1;
+    this._lastVarVals = {};
+    this._uniformListBase = 0;
   }
 
   async init () {
@@ -250,12 +255,25 @@ class WebGPURenderer {
     const device = this._device;
     const cache = this._readVariableCache();
     let off = 0;
-    this._uniformData[off++] = this.canvas.width;
-    this._uniformData[off++] = this.canvas.height;
-    this._uniformData[off++] = this.getTime();
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const t = this.getTime();
+    let dirty = (this._lastW !== w || this._lastH !== h || this._lastTime !== t);
+    this._uniformData[off++] = w;
+    this._uniformData[off++] = h;
+    this._uniformData[off++] = t;
     this._uniformData[off++] = 0;
+    this._lastW = w;
+    this._lastH = h;
+    this._lastTime = t;
     for (const v of this._compiled.variableUniforms || []) {
-      this._uniformData[off++] = cache[v.scratchName] !== undefined ? cache[v.scratchName] : 0;
+      const val = cache[v.scratchName] !== undefined ? cache[v.scratchName] : 0;
+      if (this._lastVarVals[v.scratchName] !== val) {
+        this._uniformData[off] = val;
+        this._lastVarVals[v.scratchName] = val;
+        dirty = true;
+      }
+      off++;
     }
     if (this._listPackInfo) {
       this._uniformData[off++] = this._listWidth;
@@ -274,8 +292,9 @@ class WebGPURenderer {
         this._uniformData[off++] = 0;
       }
     }
-    device.queue.writeBuffer(this._uniformBuffer, 0, this._uniformData);
-
+    if (dirty) {
+      device.queue.writeBuffer(this._uniformBuffer, 0, this._uniformData.subarray(0, off));
+    }
     const encoder = device.createCommandEncoder();
     const view = this._context.getCurrentTexture().createView();
     const pass = encoder.beginRenderPass({

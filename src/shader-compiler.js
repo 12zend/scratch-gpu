@@ -666,6 +666,8 @@ export class ScratchShaderCompiler {
       }
       case 'data_changevariableby': {
         const name = this._getField(b, 'VARIABLE');
+        const valLit = this._literalValue(b, 'VALUE');
+        if (valLit === 0) return `${ind}`;
         const val = this._inputExpr(b, 'VALUE');
         return `${ind}${this._varTarget(name)} += ${val};`;
       }
@@ -876,13 +878,36 @@ export class ScratchShaderCompiler {
     if (!input) return null;
     const childId = this._inputChild(input);
     if (!childId) return null;
-    const b = this._block(childId);
+    return this._exprLiteral(childId);
+  }
+
+  _exprLiteral (blockId) {
+    if (!blockId) return null;
+    const b = this._block(blockId);
     if (!b) return null;
-    if (['math_number', 'math_positive_number', 'math_whole_number', 'math_integer', 'math_angle'].includes(b.opcode)) {
+    const op = b.opcode;
+    if (['math_number', 'math_positive_number', 'math_whole_number', 'math_integer', 'math_angle'].includes(op)) {
       return parseNum(this._getField(b, 'NUM'));
     }
-    if (b.opcode === 'text') {
+    if (op === 'text') {
       return parseNum(this._getField(b, 'TEXT'));
+    }
+    if (op === 'operator_add') {
+      const a = this._exprLiteral(this._inputChild(b.inputs.NUM1));
+      const d = this._exprLiteral(this._inputChild(b.inputs.NUM2));
+      if (a !== null && d !== null) return a + d;
+    } else if (op === 'operator_subtract') {
+      const a = this._exprLiteral(this._inputChild(b.inputs.NUM1));
+      const d = this._exprLiteral(this._inputChild(b.inputs.NUM2));
+      if (a !== null && d !== null) return a - d;
+    } else if (op === 'operator_multiply') {
+      const a = this._exprLiteral(this._inputChild(b.inputs.NUM1));
+      const d = this._exprLiteral(this._inputChild(b.inputs.NUM2));
+      if (a !== null && d !== null) return a * d;
+    } else if (op === 'operator_divide') {
+      const a = this._exprLiteral(this._inputChild(b.inputs.NUM1));
+      const d = this._exprLiteral(this._inputChild(b.inputs.NUM2));
+      if (a !== null && d !== null && d !== 0) return a / d;
     }
     return null;
   }
@@ -953,17 +978,38 @@ export class ScratchShaderCompiler {
         this.warnings.push(`Argument reporter "${name}" is not a parameter of this block; using 0.`);
         return '0.0';
       }
-      case 'operator_add':
+      case 'operator_add': {
+        const aLit = this._literalValue(b, 'NUM1');
+        const bLit = this._literalValue(b, 'NUM2');
+        if (aLit !== null && bLit !== null) return glslNum(aLit + bLit);
+        if (aLit === 0) return this._inputExpr(b, 'NUM2');
+        if (bLit === 0) return this._inputExpr(b, 'NUM1');
         return `(${this._inputExpr(b, 'NUM1')} + ${this._inputExpr(b, 'NUM2')})`;
-      case 'operator_subtract':
+      }
+      case 'operator_subtract': {
+        const aLit = this._literalValue(b, 'NUM1');
+        const bLit = this._literalValue(b, 'NUM2');
+        if (aLit !== null && bLit !== null) return glslNum(aLit - bLit);
+        if (bLit === 0) return this._inputExpr(b, 'NUM1');
         return `(${this._inputExpr(b, 'NUM1')} - ${this._inputExpr(b, 'NUM2')})`;
-      case 'operator_multiply':
+      }
+      case 'operator_multiply': {
+        const aLit = this._literalValue(b, 'NUM1');
+        const bLit = this._literalValue(b, 'NUM2');
+        if (aLit !== null && bLit !== null) return glslNum(aLit * bLit);
+        if (aLit === 0 || bLit === 0) return '0.0';
+        if (aLit === 1) return this._inputExpr(b, 'NUM2');
+        if (bLit === 1) return this._inputExpr(b, 'NUM1');
         return `(${this._inputExpr(b, 'NUM1')} * ${this._inputExpr(b, 'NUM2')})`;
+      }
       case 'operator_divide': {
+        const aLit = this._literalValue(b, 'NUM1');
+        const bLit = this._literalValue(b, 'NUM2');
+        if (aLit !== null && bLit !== null && bLit !== 0) return glslNum(aLit / bLit);
+        if (aLit === 0) return '0.0';
         const a = this._inputExpr(b, 'NUM1');
         const d = this._inputExpr(b, 'NUM2');
-        const dLit = this._literalValue(b, 'NUM2');
-        if (dLit !== null && dLit !== 0) {
+        if (bLit !== null && bLit !== 0) {
           return `(${a} / ${d})`;
         }
         return `((${d} == 0.0) ? 1e20 : (${a} / ${d}))`;

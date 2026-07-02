@@ -255,6 +255,8 @@ export class ShaderCompilerWGSL extends ScratchShaderCompiler {
       }
       case 'data_changevariableby': {
         const name = this._getField(b, 'VARIABLE');
+        const valLit = this._literalValue(b, 'VALUE');
+        if (valLit === 0) return `${ind}`;
         const val = this._inputExpr(b, 'VALUE');
         return `${ind}${this._varTarget(name)} += ${val};`;
       }
@@ -480,17 +482,38 @@ export class ShaderCompilerWGSL extends ScratchShaderCompiler {
         this.warnings.push(`Argument reporter "${name}" is not a parameter of this block; using 0.`);
         return '0.0';
       }
-      case 'operator_add':
+      case 'operator_add': {
+        const aLit = this._literalValue(b, 'NUM1');
+        const bLit = this._literalValue(b, 'NUM2');
+        if (aLit !== null && bLit !== null) return wgslNum(aLit + bLit);
+        if (aLit === 0) return this._inputExpr(b, 'NUM2');
+        if (bLit === 0) return this._inputExpr(b, 'NUM1');
         return `(${this._inputExpr(b, 'NUM1')} + ${this._inputExpr(b, 'NUM2')})`;
-      case 'operator_subtract':
+      }
+      case 'operator_subtract': {
+        const aLit = this._literalValue(b, 'NUM1');
+        const bLit = this._literalValue(b, 'NUM2');
+        if (aLit !== null && bLit !== null) return wgslNum(aLit - bLit);
+        if (bLit === 0) return this._inputExpr(b, 'NUM1');
         return `(${this._inputExpr(b, 'NUM1')} - ${this._inputExpr(b, 'NUM2')})`;
-      case 'operator_multiply':
+      }
+      case 'operator_multiply': {
+        const aLit = this._literalValue(b, 'NUM1');
+        const bLit = this._literalValue(b, 'NUM2');
+        if (aLit !== null && bLit !== null) return wgslNum(aLit * bLit);
+        if (aLit === 0 || bLit === 0) return '0.0';
+        if (aLit === 1) return this._inputExpr(b, 'NUM2');
+        if (bLit === 1) return this._inputExpr(b, 'NUM1');
         return `(${this._inputExpr(b, 'NUM1')} * ${this._inputExpr(b, 'NUM2')})`;
+      }
       case 'operator_divide': {
+        const aLit = this._literalValue(b, 'NUM1');
+        const bLit = this._literalValue(b, 'NUM2');
+        if (aLit !== null && bLit !== null && bLit !== 0) return wgslNum(aLit / bLit);
+        if (aLit === 0) return '0.0';
         const a = this._inputExpr(b, 'NUM1');
         const d = this._inputExpr(b, 'NUM2');
-        const dLit = this._literalValue(b, 'NUM2');
-        if (dLit !== null && dLit !== 0) {
+        if (bLit !== null && bLit !== 0) {
           return `(${a} / ${d})`;
         }
         return `select(1e20, ${a} / ${d}, ${d} != 0.0)`;

@@ -270,6 +270,7 @@ class Scaffolding extends EventTarget {
     this._shaderCanvas.style.display = 'block';
     this._shaderRenderer.resetTime();
     this._shaderRenderer.start();
+    this._skipPixelOnCPU(compiler);
     this.shaderEnabled = true;
     this._updateShaderStatus();
   }
@@ -336,8 +337,37 @@ class Scaffolding extends EventTarget {
   disableShader () {
     if (this._shaderRenderer) this._shaderRenderer.stop();
     if (this._shaderCanvas) this._shaderCanvas.style.display = 'none';
+    this._restorePixelOnCPU();
     this.shaderEnabled = false;
     this._updateShaderStatus();
+  }
+
+  _skipPixelOnCPU (compiler) {
+    this._restorePixelOnCPU();
+    const pixel = compiler._pixel;
+    if (!pixel || !pixel.proccode) return;
+    const targets = (this.vm && this.vm.runtime && this.vm.runtime.targets) || [];
+    for (const target of targets) {
+      if (!target || !target.blocks || !target.blocks._blocks) continue;
+      for (const id in target.blocks._blocks) {
+        const b = target.blocks._blocks[id];
+        if (b.opcode !== 'procedures_definition') continue;
+        const protoId = b.inputs && b.inputs.custom_block && b.inputs.custom_block.block;
+        const proto = protoId && target.blocks._blocks[protoId];
+        if (!proto || !proto.mutation || proto.mutation.proccode !== pixel.proccode) continue;
+        this._pixelBodyBackup = { blockId: id, originalNext: b.next, targetBlocks: target.blocks };
+        b.next = null;
+        return;
+      }
+    }
+  }
+
+  _restorePixelOnCPU () {
+    if (!this._pixelBodyBackup) return;
+    const { blockId, originalNext, targetBlocks } = this._pixelBodyBackup;
+    const b = targetBlocks._blocks[blockId];
+    if (b) b.next = originalNext;
+    this._pixelBodyBackup = null;
   }
 
   async _initWebGPURenderer () {
@@ -361,6 +391,7 @@ class Scaffolding extends EventTarget {
       if (this._shaderRenderer.destroy) this._shaderRenderer.destroy();
       this._shaderRenderer = null;
     }
+    this._restorePixelOnCPU();
     this.shaderEnabled = false;
     if (backend === 'webgpu') {
       await this._initWebGPURenderer();
