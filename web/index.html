@@ -65,6 +65,33 @@
     white-space: pre;
   }
 
+  #backend-toggle {
+    position: fixed;
+    top: 8px;
+    right: 8px;
+    z-index: 20;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.7);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    user-select: none;
+  }
+  #backend-toggle:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.95);
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+  #backend-toggle:active {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
   /* Hide everything inside scaffolding except the shader canvas. */
   .sc-root .sc-canvas,
   .sc-root .sc-scaled-overlays-outer,
@@ -90,6 +117,7 @@
 </div>
 <input type="file" id="file-input" accept=".sb3">
 <div id="status">ready</div>
+<div id="backend-toggle">WebGPU</div>
 <script src="scaffolding-min.js"></script>
 <script>
   const status = document.getElementById('status');
@@ -98,13 +126,32 @@
   const s = new Scaffolding.Scaffolding();
   s.width = 480;
   s.height = 360;
-  // 1.0 renders the shader at the full 480x360 stage size. Lower values cut
-  // pixel work and are friendlier on weak GPUs; set to 0.5 for 240x180.
   s.shaderScale = 1;
   s.editableLists = true;
   s.shouldConnectPeripherals = false;
+  s.shaderBackend = 'webgpu';
   s.setup();
   s.appendTo(document.body);
+  s.addEventListener('backendChanged', () => {
+    const actual = s.shaderBackend;
+    backendToggle.textContent = actual === 'webgpu' ? 'WebGPU' : 'WebGL';
+  });
+
+  const backendToggle = document.getElementById('backend-toggle');
+  let switching = false;
+  backendToggle.addEventListener('click', async () => {
+    if (switching) return;
+    switching = true;
+    backendToggle.style.opacity = '0.4';
+    const next = s.shaderBackend === 'webgpu' ? 'webgl' : 'webgpu';
+    log('switching to ' + next);
+    await s.switchShaderBackend(next);
+    const actual = s.shaderBackend;
+    backendToggle.textContent = actual === 'webgpu' ? 'WebGPU' : 'WebGL';
+    backendToggle.style.opacity = '1';
+    switching = false;
+    log('backend: ' + actual);
+  });
 
   const drop = document.getElementById('drop');
   const fileInput = document.getElementById('file-input');

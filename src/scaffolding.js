@@ -7,6 +7,8 @@ import Question from './question.js';
 import defaultMessages from './messages.json';
 import ScratchShaderCompiler from './shader-compiler.js';
 import ShaderRenderer from './shader-renderer.js';
+import { ShaderCompilerWGSL } from './shader-compiler-wgsl.js';
+import WebGPURenderer from './shader-renderer-webgpu.js';
 
 /**
  * @param {MouseEvent|TouchEvent} event
@@ -71,6 +73,7 @@ class Scaffolding extends EventTarget {
     this.shaderOnTop = true;
     this.shaderEnabled = false;
     this.shaderDiagnostics = null;
+    this.shaderBackend = 'webgpu';
 
     this._monitors = new Map();
     this._mousedownPosition = null;
@@ -218,7 +221,10 @@ class Scaffolding extends EventTarget {
     if (!this._shaderRenderer) return;
     this._shaderRenderer.stop();
     if (this._shaderRenderer.clearGlErrors) this._shaderRenderer.clearGlErrors();
-    const compiler = new ScratchShaderCompiler(this.vm.runtime);
+    const useWebGPU = this.shaderBackend === 'webgpu';
+    const compiler = useWebGPU
+      ? new ShaderCompilerWGSL(this.vm.runtime)
+      : new ScratchShaderCompiler(this.vm.runtime);
     let result;
     try {
       result = compiler.compile();
@@ -247,11 +253,13 @@ class Scaffolding extends EventTarget {
       this._updateShaderStatus();
       return;
     }
-    const ok = this._shaderRenderer.setProgram(result, (name) => this._readShaderVariable(name));
+    const ok = useWebGPU
+      ? this._shaderRenderer.setProgram(result)
+      : this._shaderRenderer.setProgram(result, (name) => this._readShaderVariable(name));
     if (!ok) {
       this._shaderCanvas.style.display = 'none';
       this.shaderEnabled = false;
-      this.shaderDiagnostics.errors = (this.shaderDiagnostics.errors || []).concat(['WebGL program failed to compile (see console for the GLSL log).']);
+      this.shaderDiagnostics.errors = (this.shaderDiagnostics.errors || []).concat(['GPU program failed to compile (see console).']);
       this._updateShaderStatus();
       return;
     }
@@ -330,6 +338,52 @@ class Scaffolding extends EventTarget {
     if (this._shaderCanvas) this._shaderCanvas.style.display = 'none';
     this.shaderEnabled = false;
     this._updateShaderStatus();
+  }
+
+  async _initWebGPURenderer () {
+    try {
+      const renderer = new WebGPURenderer(this._shaderCanvas);
+      await renderer.init();
+      this._shaderRenderer = renderer;
+      this._startShaderErrorPolling();
+    } catch (e) {
+      console.warn('WebGPU shader renderer disabled:', e.message);
+      this._shaderRenderer = null;
+    }
+  }
+
+  async switchShaderBackend (backend) {
+    if (backend !== 'webgl' && backend !== 'webgpu') return;
+    if (backend === this.shaderBackend) return;
+    this.shaderBackend = backend;
+    if (this._shaderRenderer) {
+      this._shaderRenderer.stop();
+      if (this._shaderRenderer.destroy) this._shaderRenderer.destroy();
+      this._shaderRenderer = null;
+    }
+    this.shaderEnabled = false;
+    if (backend === 'webgpu') {
+      await this._initWebGPURenderer();
+      if (!this._shaderRenderer) {
+        console.warn('WebGPU unavailable, falling back to WebGL.');
+        this.shaderBackend = 'webgl';
+        try {
+          this._shaderRenderer = new ShaderRenderer(this._shaderCanvas);
+        } catch (e) {
+          this._shaderRenderer = null;
+        }
+      }
+    } else {
+      try {
+        this._shaderRenderer = new ShaderRenderer(this._shaderCanvas);
+      } catch (e) {
+        this._shaderRenderer = null;
+      }
+    }
+    if (this._shaderRenderer && this.vm && this.vm.runtime) {
+      this._tryEnableShader();
+    }
+    this.dispatchEvent(new CustomEvent('backendChanged', { detail: this.shaderBackend }));
   }
 
   recompileShader () {
@@ -600,12 +654,28 @@ class Scaffolding extends EventTarget {
     this.vm.on('PROJECT_RUN_STOP', () => this.dispatchEvent(new Event('PROJECT_RUN_STOP')));
 
     this._placeShaderCanvas();
-    try {
-      this._shaderRenderer = new ShaderRenderer(this._shaderCanvas);
-      this._startShaderErrorPolling();
-    } catch (e) {
-      console.warn('Shader renderer disabled:', e.message);
-      this._shaderRenderer = null;
+    this._rendererReady = Promise.resolve();
+    if (this.shaderBackend === 'webgpu') {
+      this._rendererReady = this._initWebGPURenderer().then(() => {
+        if (!this._shaderRenderer && this.shaderBackend === 'webgpu') {
+          console.warn('WebGPU unavailable, falling back to WebGL.');
+          this.shaderBackend = 'webgl';
+          try {
+            this._shaderRenderer = new ShaderRenderer(this._shaderCanvas);
+            this._startShaderErrorPolling();
+          } catch (e) {
+            this._shaderRenderer = null;
+          }
+        }
+      });
+    } else {
+      try {
+        this._shaderRenderer = new ShaderRenderer(this._shaderCanvas);
+        this._startShaderErrorPolling();
+      } catch (e) {
+        console.warn('Shader renderer disabled:', e.message);
+        this._shaderRenderer = null;
+      }
     }
 
     // TurboWarp-specific VM extensions
@@ -751,15 +821,20 @@ class Scaffolding extends EventTarget {
         this.vm.setCloudProvider(this.cloudManager);
         this.cloudManager.projectReady();
         this.renderer.draw();
-        // Render again after a short delay because some costumes are loaded async
         setTimeout(() => {
           this.renderer.draw();
         });
 
-        this._tryEnableShader();
-
-        if (this.shouldConnectPeripherals) {
-          this._connectPeripherals();
+        const enableShader = () => {
+          this._tryEnableShader();
+          if (this.shouldConnectPeripherals) {
+            this._connectPeripherals();
+          }
+        };
+        if (this._rendererReady) {
+          this._rendererReady.then(enableShader);
+        } else {
+          enableShader();
         }
       });
   }
