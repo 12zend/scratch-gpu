@@ -568,14 +568,8 @@ class Scaffolding extends EventTarget {
     this.vm.postIOData('mouseWheel', data);
   }
 
-  _isTextInputTarget (target) {
-    if (!target || target === document || target === document.body) return false;
-    const tag = target.tagName;
-    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
-  }
-
   _onkeydown (e) {
-    if (this._isTextInputTarget(e.target)) {
+    if (e.target !== document && e.target !== document.body) {
       return;
     }
     const data = {
@@ -590,9 +584,6 @@ class Scaffolding extends EventTarget {
   }
 
   _onkeyup (e) {
-    if (this._isTextInputTarget(e.target)) {
-      return;
-    }
     const data = {
       key: e.key,
       keyCode: e.keyCode,

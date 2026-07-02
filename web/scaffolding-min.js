@@ -86325,10 +86325,6 @@ __webpack_require__.r(__webpack_exports__);
 var _messages_json__WEBPACK_IMPORTED_MODULE_6___namespace = /*#__PURE__*/__webpack_require__.t(/*! ./messages.json */ "./src/messages.json", 1);
 /* harmony import */ var _shader_compiler_js__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! ./shader-compiler.js */ "./src/shader-compiler.js");
 /* harmony import */ var _shader_renderer_js__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! ./shader-renderer.js */ "./src/shader-renderer.js");
-/* harmony import */ var _shader_compiler_wgsl_js__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(/*! ./shader-compiler-wgsl.js */ "./src/shader-compiler-wgsl.js");
-/* harmony import */ var _shader_renderer_webgpu_js__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(/*! ./shader-renderer-webgpu.js */ "./src/shader-renderer-webgpu.js");
-
-
 
 
 
@@ -86405,7 +86401,6 @@ class Scaffolding extends EventTarget {
     this.shaderOnTop = true;
     this.shaderEnabled = false;
     this.shaderDiagnostics = null;
-    this.shaderBackend = 'webgpu';
     this._monitors = new Map();
     this._mousedownPosition = null;
     this._draggingId = null;
@@ -86537,8 +86532,7 @@ class Scaffolding extends EventTarget {
     if (!this._shaderRenderer) return;
     this._shaderRenderer.stop();
     if (this._shaderRenderer.clearGlErrors) this._shaderRenderer.clearGlErrors();
-    const useWebGPU = this.shaderBackend === 'webgpu';
-    const compiler = useWebGPU ? new _shader_compiler_wgsl_js__WEBPACK_IMPORTED_MODULE_9__["ShaderCompilerWGSL"](this.vm.runtime) : new _shader_compiler_js__WEBPACK_IMPORTED_MODULE_7__["default"](this.vm.runtime);
+    const compiler = new _shader_compiler_js__WEBPACK_IMPORTED_MODULE_7__["default"](this.vm.runtime);
     let result;
     try {
       result = compiler.compile();
@@ -86571,22 +86565,20 @@ class Scaffolding extends EventTarget {
       this._updateShaderStatus();
       return;
     }
-    const ok = useWebGPU ? this._shaderRenderer.setProgram(result) : this._shaderRenderer.setProgram(result, name => this._readShaderVariable(name));
+    const ok = this._shaderRenderer.setProgram(result, name => this._readShaderVariable(name));
     if (!ok) {
       this._shaderCanvas.style.display = 'none';
       this.shaderEnabled = false;
-      this.shaderDiagnostics.errors = (this.shaderDiagnostics.errors || []).concat(['GPU program failed to compile (see console).']);
+      this.shaderDiagnostics.errors = (this.shaderDiagnostics.errors || []).concat(['WebGL program failed to compile (see console for the GLSL log).']);
       this._updateShaderStatus();
       return;
     }
-    this._shaderRenderer.setVariableCacheProvider(() => this._buildVariableCache());
-    this._shaderRenderer.setListReader(name => this._readShaderListCached(name));
+    this._shaderRenderer.setListReader(name => this._readShaderList(name));
     this._shaderRenderer.uploadListData();
     this._shaderRenderer.resize(this.width * this.shaderScale, this.height * this.shaderScale);
     this._shaderCanvas.style.display = 'block';
     this._shaderRenderer.resetTime();
     this._shaderRenderer.start();
-    this._skipPixelOnCPU(compiler);
     this.shaderEnabled = true;
     this._updateShaderStatus();
   }
@@ -86615,143 +86607,23 @@ class Scaffolding extends EventTarget {
   }
   refreshShaderLists() {
     if (this._shaderRenderer && this.shaderEnabled) {
-      this._listDataCache = null;
       this._shaderRenderer.uploadListData();
     }
-  }
-  _buildVariableCache() {
-    const cache = {};
-    const targets = this.vm && this.vm.runtime && this.vm.runtime.targets || [];
-    for (const target of targets) {
-      if (!target || !target.variables) continue;
-      for (const id in target.variables) {
-        const v = target.variables[id];
-        if (v.type === 'list') continue;
-        if (cache[v.name] !== undefined) continue;
-        const val = v.value;
-        if (typeof val === 'number') cache[v.name] = val;else if (typeof val === 'boolean') cache[v.name] = val ? 1 : 0;else {
-          const n = parseFloat(val);
-          cache[v.name] = isFinite(n) ? n : 0;
-        }
-      }
-    }
-    return cache;
-  }
-  _readShaderListCached(name) {
-    if (!this._listDataCache) {
-      this._listDataCache = new Map();
-    }
-    const cached = this._listDataCache.get(name);
-    if (cached !== undefined) return cached;
-    const data = this._readShaderList(name);
-    this._listDataCache.set(name, data);
-    return data;
   }
   disableShader() {
     if (this._shaderRenderer) this._shaderRenderer.stop();
     if (this._shaderCanvas) this._shaderCanvas.style.display = 'none';
-    this._restorePixelOnCPU();
     this.shaderEnabled = false;
     this._updateShaderStatus();
-  }
-  _skipPixelOnCPU(compiler) {
-    this._restorePixelOnCPU();
-    const pixel = compiler._pixel;
-    if (!pixel || !pixel.proccode) return;
-    const targets = this.vm && this.vm.runtime && this.vm.runtime.targets || [];
-    for (const target of targets) {
-      if (!target || !target.blocks || !target.blocks._blocks) continue;
-      for (const id in target.blocks._blocks) {
-        const b = target.blocks._blocks[id];
-        if (b.opcode !== 'procedures_definition') continue;
-        const protoId = b.inputs && b.inputs.custom_block && b.inputs.custom_block.block;
-        const proto = protoId && target.blocks._blocks[protoId];
-        if (!proto || !proto.mutation || proto.mutation.proccode !== pixel.proccode) continue;
-        this._pixelBodyBackup = {
-          blockId: id,
-          originalNext: b.next,
-          targetBlocks: target.blocks
-        };
-        b.next = null;
-        return;
-      }
-    }
-  }
-  _restorePixelOnCPU() {
-    if (!this._pixelBodyBackup) return;
-    const {
-      blockId,
-      originalNext,
-      targetBlocks
-    } = this._pixelBodyBackup;
-    const b = targetBlocks._blocks[blockId];
-    if (b) b.next = originalNext;
-    this._pixelBodyBackup = null;
-  }
-  async _initWebGPURenderer() {
-    try {
-      const renderer = new _shader_renderer_webgpu_js__WEBPACK_IMPORTED_MODULE_10__["default"](this._shaderCanvas);
-      await renderer.init();
-      this._shaderRenderer = renderer;
-      this._startShaderErrorPolling();
-    } catch (e) {
-      console.warn('WebGPU shader renderer disabled:', e.message);
-      this._shaderRenderer = null;
-    }
-  }
-  async switchShaderBackend(backend) {
-    if (backend !== 'webgl' && backend !== 'webgpu') return;
-    if (backend === this.shaderBackend) return;
-    this.shaderBackend = backend;
-    if (this._shaderRenderer) {
-      this._shaderRenderer.stop();
-      if (this._shaderRenderer.destroy) this._shaderRenderer.destroy();
-      this._shaderRenderer = null;
-    }
-    this._restorePixelOnCPU();
-    this.shaderEnabled = false;
-    if (backend === 'webgpu') {
-      await this._initWebGPURenderer();
-      if (!this._shaderRenderer) {
-        console.warn('WebGPU unavailable, falling back to WebGL.');
-        this.shaderBackend = 'webgl';
-        try {
-          this._shaderRenderer = new _shader_renderer_js__WEBPACK_IMPORTED_MODULE_8__["default"](this._shaderCanvas);
-        } catch (e) {
-          this._shaderRenderer = null;
-        }
-      }
-    } else {
-      try {
-        this._shaderRenderer = new _shader_renderer_js__WEBPACK_IMPORTED_MODULE_8__["default"](this._shaderCanvas);
-      } catch (e) {
-        this._shaderRenderer = null;
-      }
-    }
-    if (this._shaderRenderer && this.vm && this.vm.runtime) {
-      this._tryEnableShader();
-    }
-    this.dispatchEvent(new CustomEvent('backendChanged', {
-      detail: this.shaderBackend
-    }));
   }
   recompileShader() {
     if (this.vm && this.vm.runtime) this._tryEnableShader();
   }
   _startShaderErrorPolling() {
     if (this._shaderErrorPolling) return;
-    let count = 0;
-    const MAX_POLLS = 10;
-    const poll = () => {
+    this._shaderErrorPolling = setInterval(() => {
       if (this._shaderRenderer) this._updateShaderStatus();
-      count++;
-      if (count >= MAX_POLLS) {
-        this._shaderErrorPolling = null;
-        return;
-      }
-      this._shaderErrorPolling = setTimeout(poll, 500);
-    };
-    this._shaderErrorPolling = setTimeout(poll, 500);
+    }, 500);
   }
   _scratchCoordinates(x, y) {
     return {
@@ -86879,13 +86751,8 @@ class Scaffolding extends EventTarget {
     };
     this.vm.postIOData('mouseWheel', data);
   }
-  _isTextInputTarget(target) {
-    if (!target || target === document || target === document.body) return false;
-    const tag = target.tagName;
-    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
-  }
   _onkeydown(e) {
-    if (this._isTextInputTarget(e.target)) {
+    if (e.target !== document && e.target !== document.body) {
       return;
     }
     const data = {
@@ -86899,9 +86766,6 @@ class Scaffolding extends EventTarget {
     }
   }
   _onkeyup(e) {
-    if (this._isTextInputTarget(e.target)) {
-      return;
-    }
     const data = {
       key: e.key,
       keyCode: e.keyCode,
@@ -86990,28 +86854,12 @@ class Scaffolding extends EventTarget {
     this.vm.on('PROJECT_RUN_START', () => this.dispatchEvent(new Event('PROJECT_RUN_START')));
     this.vm.on('PROJECT_RUN_STOP', () => this.dispatchEvent(new Event('PROJECT_RUN_STOP')));
     this._placeShaderCanvas();
-    this._rendererReady = Promise.resolve();
-    if (this.shaderBackend === 'webgpu') {
-      this._rendererReady = this._initWebGPURenderer().then(() => {
-        if (!this._shaderRenderer && this.shaderBackend === 'webgpu') {
-          console.warn('WebGPU unavailable, falling back to WebGL.');
-          this.shaderBackend = 'webgl';
-          try {
-            this._shaderRenderer = new _shader_renderer_js__WEBPACK_IMPORTED_MODULE_8__["default"](this._shaderCanvas);
-            this._startShaderErrorPolling();
-          } catch (e) {
-            this._shaderRenderer = null;
-          }
-        }
-      });
-    } else {
-      try {
-        this._shaderRenderer = new _shader_renderer_js__WEBPACK_IMPORTED_MODULE_8__["default"](this._shaderCanvas);
-        this._startShaderErrorPolling();
-      } catch (e) {
-        console.warn('Shader renderer disabled:', e.message);
-        this._shaderRenderer = null;
-      }
+    try {
+      this._shaderRenderer = new _shader_renderer_js__WEBPACK_IMPORTED_MODULE_8__["default"](this._shaderCanvas);
+      this._startShaderErrorPolling();
+    } catch (e) {
+      console.warn('Shader renderer disabled:', e.message);
+      this._shaderRenderer = null;
     }
 
     // TurboWarp-specific VM extensions
@@ -87133,19 +86981,13 @@ class Scaffolding extends EventTarget {
       this.vm.setCloudProvider(this.cloudManager);
       this.cloudManager.projectReady();
       this.renderer.draw();
+      // Render again after a short delay because some costumes are loaded async
       setTimeout(() => {
         this.renderer.draw();
       });
-      const enableShader = () => {
-        this._tryEnableShader();
-        if (this.shouldConnectPeripherals) {
-          this._connectPeripherals();
-        }
-      };
-      if (this._rendererReady) {
-        this._rendererReady.then(enableShader);
-      } else {
-        enableShader();
+      this._tryEnableShader();
+      if (this.shouldConnectPeripherals) {
+        this._connectPeripherals();
       }
     });
   }
@@ -87204,8 +87046,6 @@ class Scaffolding extends EventTarget {
     if (this._shaderListRefreshTimer) return;
     let lastSignature = null;
     let stableCount = 0;
-    let tickCount = 0;
-    const MAX_TICKS = 40;
     const tick = () => {
       const sig = this._computeListSignature();
       if (sig === lastSignature) {
@@ -87215,13 +87055,11 @@ class Scaffolding extends EventTarget {
         lastSignature = sig;
       }
       this.refreshShaderLists();
-      tickCount++;
-      const stable = stableCount >= 3;
-      if (stable || tickCount >= MAX_TICKS) {
-        this._shaderListRefreshTimer = null;
-        return;
-      }
-      this._shaderListRefreshTimer = setTimeout(tick, 250);
+      // Keep refreshing while the list data is still changing; once it has been
+      // stable for a few ticks we can back off to a slow poll (lists may still be
+      // mutated at runtime by some projects).
+      const stable = stableCount >= 5;
+      this._shaderListRefreshTimer = setTimeout(tick, stable ? 1000 : 250);
     };
     this._shaderListRefreshTimer = setTimeout(tick, 250);
   }
@@ -87292,685 +87130,6 @@ class Scaffolding extends EventTarget {
 
 /***/ }),
 
-/***/ "./src/shader-compiler-wgsl.js":
-/*!*************************************!*\
-  !*** ./src/shader-compiler-wgsl.js ***!
-  \*************************************/
-/*! exports provided: ShaderCompilerWGSL, default */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ShaderCompilerWGSL", function() { return ShaderCompilerWGSL; });
-/* harmony import */ var _shader_compiler_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./shader-compiler.js */ "./src/shader-compiler.js");
-
-const wgslNum = n => {
-  const s = String(n);
-  if (s.indexOf('.') === -1 && s.indexOf('e') === -1 && s.indexOf('E') === -1 && s.indexOf('inf') === -1 && s.indexOf('Inf') === -1 && s.indexOf('NaN') === -1) {
-    return s + '.0';
-  }
-  return s;
-};
-class ShaderCompilerWGSL extends _shader_compiler_js__WEBPACK_IMPORTED_MODULE_0__["ScratchShaderCompiler"] {
-  constructor(runtime) {
-    super(runtime);
-    this._uniformFields = [];
-  }
-  compile() {
-    this._discoverProcedures();
-    if (this._procedures.size === 0) {
-      return {
-        found: false,
-        warnings: this.warnings,
-        errors: this.errors,
-        backend: 'webgpu'
-      };
-    }
-    this._pixel = this._findPixel();
-    if (!this._pixel) {
-      return {
-        found: false,
-        warnings: this.warnings,
-        errors: this.errors,
-        backend: 'webgpu'
-      };
-    }
-    if (this._pixel.isReporter) {
-      this.errors.push('The "pixel" block must be a command (stack) block, not a reporter.');
-      return {
-        found: true,
-        warnings: this.warnings,
-        errors: this.errors,
-        backend: 'webgpu'
-      };
-    }
-    this._pruneUnreachable();
-    const cycle = this._detectRecursion();
-    if (cycle) {
-      this.errors.push("Recursion is not supported in shaders: ".concat(cycle.join(' -> ')));
-      return {
-        found: true,
-        warnings: this.warnings,
-        errors: this.errors,
-        backend: 'webgpu'
-      };
-    }
-    this._analyzeUsage();
-    if (this.errors.length) {
-      return {
-        found: true,
-        warnings: this.warnings,
-        errors: this.errors,
-        backend: 'webgpu'
-      };
-    }
-    const wgslSource = this._generateWgsl();
-    return {
-      found: true,
-      backend: 'webgpu',
-      wgslSource,
-      variableUniforms: this._uniformVars.slice(),
-      listTextures: this._listTextures.slice(),
-      pixelArgNames: this._pixel.paramNames.slice(),
-      warnings: this.warnings,
-      errors: this.errors
-    };
-  }
-  _generateWgsl() {
-    const lines = [];
-    this._uniformFields = [];
-    this._uniformFields.push('  u_resolution: vec2f,');
-    this._uniformFields.push('  u_time: f32,');
-    const stageVars = this._stageVariableValues();
-    for (const [name, usage] of this._varUsage) {
-      if (name.toLowerCase() === 'color') continue;
-      const v = this._uid(name, 'sc_v_');
-      this._globalVars.push(v);
-      if (stageVars.has(name) && usage.read && !usage.written) {
-        const u = this._uid(name, 'sc_u_');
-        this._uniformVars.push({
-          uniform: u,
-          scratchName: name
-        });
-        this._globalVarInitializers.set(v, 'u.' + u);
-        this._uniformFields.push("  ".concat(u, ": f32,"));
-      } else {
-        const initial = stageVars.has(name) ? wgslNum(parseFloat(stageVars.get(name)) || 0) : '0.0';
-        this._globalVarInitializers.set(v, initial);
-      }
-      if (!stageVars.has(name)) {
-        this.warnings.push("Variable \"".concat(name, "\" was not found as a Scratch variable; it will be treated as a shader-local temporary."));
-      }
-    }
-    this._packLists();
-    if (this._listPacks && this._listPacks.length) {
-      this._uniformFields.push('  sc_ltex_size: vec2f,');
-      for (let ti = 0; ti < this._listPacks.length; ti++) {
-        this._uniformFields.push("  sc_llen_".concat(ti, ": vec4f,"));
-        this._uniformFields.push("  sc_lmeta_".concat(ti, ": vec3f,"));
-      }
-    }
-    lines.push('struct Uniforms {');
-    lines.push(this._uniformFields.join('\n'));
-    lines.push('}');
-    lines.push('');
-    lines.push('@group(0) @binding(0) var<uniform> u: Uniforms;');
-    if (this._listPacks && this._listPacks.length) {
-      lines.push('@group(0) @binding(1) var<storage, read> sc_ltex: array<vec4f>;');
-    }
-    lines.push('');
-    for (const v of this._globalVars) {
-      lines.push("var<private> ".concat(v, ": f32;"));
-    }
-    lines.push('var<private> sc_color: f32;');
-    lines.push('var<private> sc_frag_coord: vec2f;');
-    lines.push('');
-    if (this._listPacks && this._listPacks.length) {
-      for (let ti = 0; ti < this._listPacks.length; ti++) {
-        const pack = this._listPacks[ti];
-        for (let ci = 0; ci < pack.channels.length; ci++) {
-          const ch = pack.channels[ci];
-          if (!ch) continue;
-          const swiz = ['x', 'y', 'z', 'w'][ci];
-          const fnName = "sc_lget_".concat(ti, "_").concat(ci);
-          lines.push("fn ".concat(fnName, "(idx: f32) -> f32 {"));
-          lines.push("  let len = u.sc_llen_".concat(ti, ".").concat(swiz, ";"));
-          lines.push('  if (len <= 0.0) { return 0.0; }');
-          lines.push('  let i = u32(clamp(idx - 1.0, 0.0, len - 1.0));');
-          lines.push("  return sc_ltex[u.sc_lmeta_".concat(ti, ".z + i].").concat(swiz, ";"));
-          lines.push('}');
-        }
-      }
-      lines.push('');
-    }
-    if (this._mutableListNames && this._mutableListNames.size) {
-      this._globalMutableArrays = [];
-      for (const name of this._mutableListNames) {
-        const cap = this._mutableListSizes.get(name) || 64;
-        const arr = this._mutableArrayName(name);
-        const len = this._mutableLenName(name);
-        lines.push("var<private> ".concat(arr, ": array<f32, ").concat(cap, ">;"));
-        lines.push("var<private> ".concat(len, ": f32;"));
-        const rfn = this._uid(name, 'sc_laget_');
-        this._mutableReaderName = this._mutableReaderName || new Map();
-        this._mutableReaderName.set(name, rfn);
-        lines.push("fn ".concat(rfn, "(idx: f32) -> f32 {"));
-        lines.push("  if (".concat(len, " <= 0.0) { return 0.0; }"));
-        lines.push("  let gi = u32(clamp(idx - 1.0, 0.0, ".concat(len, " - 1.0));"));
-        lines.push("  return ".concat(arr, "[gi];"));
-        lines.push('}');
-        this._globalMutableArrays.push({
-          arr,
-          len,
-          cap
-        });
-      }
-      lines.push('');
-    }
-    lines.push('fn sc_mod(a: f32, b: f32) -> f32 {');
-    lines.push('  return a - b * floor(a / b);');
-    lines.push('}');
-    lines.push('');
-    lines.push('fn sc_rand(co: vec3f) -> f32 {');
-    lines.push('  var c = co;');
-    lines.push('  c = fract(c * 0.3183099 + vec3f(0.71, 0.113, 0.419));');
-    lines.push('  c += dot(c, c.yzx + 19.19);');
-    lines.push('  return fract((c.x + c.y) * (c.y + c.z) * (c.z + c.x));');
-    lines.push('}');
-    lines.push('');
-    const procOrder = this._topologicalOrder();
-    for (const code of procOrder) {
-      const info = this._procedures.get(code);
-      const fnName = this._uid(code, 'sc_fn_');
-      if (code === this._pixel.proccode) this._pixelFnName = fnName;
-      this._generateProcedureBody(code, info, lines);
-      lines.push('');
-    }
-    lines.push('@vertex');
-    lines.push('fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {');
-    lines.push('  let pos = array<vec2f, 4>(');
-    lines.push('    vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0), vec2f(1.0, 1.0)');
-    lines.push('  );');
-    lines.push('  return vec4f(pos[vi], 0.0, 1.0);');
-    lines.push('}');
-    lines.push('');
-    lines.push('@fragment');
-    lines.push('fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {');
-    lines.push('  sc_frag_coord = pos.xy;');
-    if (this._globalMutableArrays && this._globalMutableArrays.length) {
-      for (const m of this._globalMutableArrays) {
-        lines.push("  ".concat(m.len, " = 0.0;"));
-      }
-    }
-    for (const v of this._globalVars) {
-      lines.push("  ".concat(v, " = ").concat(this._globalVarInitializers.get(v) || '0.0', ";"));
-    }
-    lines.push('  sc_color = 0.0;');
-    lines.push('  let px = pos.x - u.u_resolution.x * 0.5;');
-    lines.push('  let py = pos.y - u.u_resolution.y * 0.5;');
-    lines.push("  ".concat(this._pixelFnName, "(px, py);"));
-    lines.push('  let c = floor(sc_color + 0.5);');
-    lines.push('  let cl = clamp(c, 0.0, 16777215.0);');
-    lines.push('  let cr = floor(cl / 65536.0);');
-    lines.push('  let cg = sc_mod(floor(cl / 256.0), 256.0);');
-    lines.push('  let cb = sc_mod(cl, 256.0);');
-    lines.push('  return vec4f(cr / 255.0, cg / 255.0, cb / 255.0, 1.0);');
-    lines.push('}');
-    if (!this._colorWritten) {
-      this.warnings.push('The "color" variable was never set inside the pixel block; the output will be black.');
-    }
-    return lines.join('\n');
-  }
-  _generateProcedureBody(code, info, lines) {
-    const fnName = this._uid(code, 'sc_fn_');
-    const params = info.paramNames.map(p => this._uid(p, 'sc_a_') + ': f32');
-    const ret = info.isReporter ? '-> f32' : '';
-    lines.push("fn ".concat(fnName, "(").concat(params.join(', '), ")").concat(ret, " {"));
-    const savedBlocks = this._blocks;
-    const savedScope = this._scope;
-    const savedReporter = this._isReporterFn;
-    const savedColorWritten = this._colorWritten;
-    const isPixel = code === this._pixel.proccode;
-    if (isPixel) this._colorWritten = false;
-    this._blocks = info.blocks;
-    this._isReporterFn = info.isReporter;
-    this._scope = new Map();
-    for (const p of info.paramNames) {
-      this._scope.set(String(p), this._uid(p, 'sc_a_'));
-    }
-    const body = this._stmts(info.bodyHead, '  ');
-    if (body) lines.push(body);
-    if (info.isReporter) {
-      lines.push('  return 0.0;');
-    }
-    lines.push('}');
-    if (!isPixel) {
-      this._colorWritten = savedColorWritten;
-    }
-    this._blocks = savedBlocks;
-    this._scope = savedScope;
-    this._isReporterFn = savedReporter;
-  }
-  _stmts(headId, ind) {
-    const parts = [];
-    let id = headId;
-    while (id) {
-      const b = this._block(id);
-      if (!b) break;
-      const s = this._stmt(b, ind);
-      if (s) parts.push(s);
-      id = b.next;
-    }
-    return parts.join('\n');
-  }
-  _stmt(b, ind) {
-    const op = b.opcode;
-    switch (op) {
-      case 'data_setvariableto':
-        {
-          const name = this._getField(b, 'VARIABLE');
-          const val = this._inputExpr(b, 'VALUE');
-          return "".concat(ind).concat(this._varTarget(name), " = ").concat(val, ";");
-        }
-      case 'data_changevariableby':
-        {
-          const name = this._getField(b, 'VARIABLE');
-          const valLit = this._literalValue(b, 'VALUE');
-          if (valLit === 0) return "".concat(ind);
-          const val = this._inputExpr(b, 'VALUE');
-          return "".concat(ind).concat(this._varTarget(name), " += ").concat(val, ";");
-        }
-      case 'control_if':
-        {
-          const cond = this._condExpr(b, 'CONDITION');
-          const body = this._substack(b, 'SUBSTACK', ind + '  ');
-          return "".concat(ind, "if ").concat(cond, " {\n").concat(body, "\n").concat(ind, "}");
-        }
-      case 'control_if_else':
-        {
-          const cond = this._condExpr(b, 'CONDITION');
-          const body1 = this._substack(b, 'SUBSTACK', ind + '  ');
-          const body2 = this._substack(b, 'SUBSTACK2', ind + '  ');
-          return "".concat(ind, "if ").concat(cond, " {\n").concat(body1, "\n").concat(ind, "} else {\n").concat(body2, "\n").concat(ind, "}");
-        }
-      case 'control_repeat':
-        {
-          const times = this._inputExpr(b, 'TIMES');
-          const body = this._substack(b, 'SUBSTACK', ind + '  ');
-          const literal = this._literalInt(b.inputs && b.inputs.TIMES);
-          if (literal !== null && literal >= 0 && literal <= 128) {
-            const out = [];
-            for (let i = 0; i < literal; i++) out.push(body);
-            return out.join('\n');
-          }
-          const lv = this._loopVar();
-          return "".concat(ind, "for (var ").concat(lv, ": i32 = 0; ").concat(lv, " < 256; ").concat(lv, "++) {\n").concat(ind, "  if (f32(").concat(lv, ") >= ").concat(times, ") { break; }\n").concat(body, "\n").concat(ind, "}");
-        }
-      case 'control_repeat_until':
-        {
-          const cond = this._condExpr(b, 'CONDITION');
-          const body = this._substack(b, 'SUBSTACK', ind + '  ');
-          const lv = this._loopVar();
-          return "".concat(ind, "for (var ").concat(lv, ": i32 = 0; ").concat(lv, " < 256; ").concat(lv, "++) {\n").concat(ind, "  if ").concat(cond, " { break; }\n").concat(body, "\n").concat(ind, "}");
-        }
-      case 'control_while':
-        {
-          const cond = this._condExpr(b, 'CONDITION');
-          const body = this._substack(b, 'SUBSTACK', ind + '  ');
-          const lv = this._loopVar();
-          return "".concat(ind, "for (var ").concat(lv, ": i32 = 0; ").concat(lv, " < 256; ").concat(lv, "++) {\n").concat(ind, "  if !(").concat(cond, ") { break; }\n").concat(body, "\n").concat(ind, "}");
-        }
-      case 'control_for_each':
-        {
-          const name = this._getField(b, 'VARIABLE');
-          const count = this._inputExpr(b, 'VALUE');
-          const body = this._substack(b, 'SUBSTACK', ind + '  ');
-          const lv = this._loopVar();
-          const target = this._varTarget(name);
-          return "".concat(ind, "for (var ").concat(lv, ": i32 = 0; ").concat(lv, " < 256; ").concat(lv, "++) {\n").concat(ind, "  if (f32(").concat(lv, ") >= ").concat(count, ") { break; }\n").concat(ind, "  ").concat(target, " = f32(").concat(lv, ") + 1.0;\n").concat(body, "\n").concat(ind, "}");
-        }
-      case 'control_stop':
-        {
-          const option = this._getField(b, 'STOP_OPTION');
-          if (option === 'this script') {
-            if (this._isReporterFn) return "".concat(ind, "return 0.0;");
-            return "".concat(ind, "return;");
-          }
-          this.warnings.push("\"".concat(op, "\" with option \"").concat(option, "\" is ignored in shader mode."));
-          return "".concat(ind);
-        }
-      case 'procedures_call':
-        {
-          const proccode = b.mutation && b.mutation.proccode;
-          if (!proccode || !this._procedures.has(proccode)) {
-            this.warnings.push("Call to unknown custom block ignored: ".concat(proccode));
-            return "".concat(ind);
-          }
-          const fnName = this._uid(proccode, 'sc_fn_');
-          const argIds = this._parseArgIds(b);
-          const args = argIds.map(aid => this._inputExpr(b, aid));
-          const isReporter = this._procedures.get(proccode).isReporter;
-          if (isReporter) {
-            this.warnings.push("Custom reporter \"".concat(proccode, "\" used as a statement; its return value is discarded."));
-          }
-          return "".concat(ind).concat(fnName, "(").concat(args.join(', '), ");");
-        }
-      case 'procedures_return':
-        {
-          if (this._isReporterFn) {
-            const val = this._inputExpr(b, 'VALUE');
-            return "".concat(ind, "return ").concat(val, ";");
-          }
-          return "".concat(ind, "return;");
-        }
-      case 'control_forever':
-        {
-          const foreverBody = this._substack(b, 'SUBSTACK', ind + '  ');
-          const fv = this._loopVar();
-          return "".concat(ind, "for (var ").concat(fv, ": i32 = 0; ").concat(fv, " < 256; ").concat(fv, "++) {\n").concat(foreverBody, "\n").concat(ind, "}");
-        }
-      case 'control_wait':
-      case 'control_wait_until':
-      case 'control_all_at_once':
-        this.warnings.push("\"".concat(op, "\" is ignored in shader mode."));
-        return "".concat(ind);
-      case 'data_replaceitemoflist':
-        {
-          const name = this._getField(b, 'LIST');
-          if (!this._isMutableList(name)) {
-            this.warnings.push("\"".concat(op, "\" on read-only list \"").concat(name, "\" is ignored in shader mode."));
-            return "".concat(ind);
-          }
-          const arr = this._mutableArrayName(name);
-          const len = this._mutableLenName(name);
-          const cap = this._mutableListSizes.get(name) || 64;
-          const idx = this._inputExpr(b, 'INDEX');
-          const val = this._inputExpr(b, 'ITEM');
-          return ["".concat(ind, "{"), "".concat(ind, "  let ri = floor(").concat(idx, " + 0.5);"), "".concat(ind, "  if (ri >= 1.0 && ri <= ").concat(len, ") {"), "".concat(ind, "    ").concat(arr, "[u32(ri - 1.0)] = ").concat(val, ";"), "".concat(ind, "  } else if (ri == ").concat(len, " + 1.0 && ").concat(len, " < f32(").concat(cap, ")) {"), "".concat(ind, "    ").concat(arr, "[u32(").concat(len, ")] = ").concat(val, ";"), "".concat(ind, "    ").concat(len, " = ").concat(len, " + 1.0;"), "".concat(ind, "  }"), "".concat(ind, "}")].join('\n');
-        }
-      case 'data_addtolist':
-        {
-          const name = this._getField(b, 'LIST');
-          if (!this._isMutableList(name)) {
-            this.warnings.push("\"".concat(op, "\" on read-only list \"").concat(name, "\" is ignored in shader mode."));
-            return "".concat(ind);
-          }
-          const arr = this._mutableArrayName(name);
-          const len = this._mutableLenName(name);
-          const cap = this._mutableListSizes.get(name) || 64;
-          const val = this._inputExpr(b, 'ITEM');
-          return "".concat(ind, "if (").concat(len, " < f32(").concat(cap, ")) { ").concat(arr, "[u32(").concat(len, ")] = ").concat(val, "; ").concat(len, " = ").concat(len, " + 1.0; }");
-        }
-      case 'data_deleteoflist':
-        {
-          const name = this._getField(b, 'LIST');
-          if (!this._isMutableList(name)) {
-            this.warnings.push("\"".concat(op, "\" on read-only list \"").concat(name, "\" is ignored in shader mode."));
-            return "".concat(ind);
-          }
-          const len = this._mutableLenName(name);
-          return "".concat(ind).concat(len, " = max(0.0, ").concat(len, " - 1.0);");
-        }
-      case 'data_deletealloflist':
-        {
-          const name = this._getField(b, 'LIST');
-          if (!this._isMutableList(name)) {
-            this.warnings.push("\"".concat(op, "\" on read-only list \"").concat(name, "\" is ignored in shader mode."));
-            return "".concat(ind);
-          }
-          const len = this._mutableLenName(name);
-          return "".concat(ind).concat(len, " = 0.0;");
-        }
-      case 'data_insertatlist':
-        this.warnings.push("\"".concat(op, "\" is not supported in shader mode (use add or replace)."));
-        return "".concat(ind);
-      default:
-        if (op && (op.startsWith('pen_') || op.startsWith('motion_') || op.startsWith('looks_') || op.startsWith('sound_') || op.startsWith('event_') || op.startsWith('sensing_') || op.startsWith('data_') || op.startsWith('control_'))) {
-          this.warnings.push("\"".concat(op, "\" is ignored in shader mode."));
-          return "".concat(ind);
-        }
-        this.warnings.push("Unsupported statement ignored: ".concat(op));
-        return "".concat(ind);
-    }
-  }
-  _substack(block, inputName, ind) {
-    const childId = this._inputChild(block.inputs && block.inputs[inputName]);
-    if (!childId) return "".concat(ind);
-    return this._stmts(childId, ind) || "".concat(ind);
-  }
-  _inputExpr(block, inputName) {
-    const input = block.inputs && block.inputs[inputName];
-    const childId = this._inputChild(input);
-    if (!childId) return '0.0';
-    return this._expr(childId);
-  }
-  _condExpr(block, inputName) {
-    const input = block.inputs && block.inputs[inputName];
-    const childId = this._inputChild(input);
-    if (!childId) {
-      return "(".concat(this._inputExpr(block, inputName), " != 0.0)");
-    }
-    const b = this._block(childId);
-    if (!b) {
-      return "(".concat(this._inputExpr(block, inputName), " != 0.0)");
-    }
-    const op = b.opcode;
-    switch (op) {
-      case 'operator_lt':
-        return "(".concat(this._inputExpr(b, 'OPERAND1'), " < ").concat(this._inputExpr(b, 'OPERAND2'), ")");
-      case 'operator_gt':
-        return "(".concat(this._inputExpr(b, 'OPERAND1'), " > ").concat(this._inputExpr(b, 'OPERAND2'), ")");
-      case 'operator_equals':
-        return "(abs(".concat(this._inputExpr(b, 'OPERAND1'), " - ").concat(this._inputExpr(b, 'OPERAND2'), ") < 0.000001)");
-      case 'operator_and':
-        return "(".concat(this._condExpr(b, 'OPERAND1'), " && ").concat(this._condExpr(b, 'OPERAND2'), ")");
-      case 'operator_or':
-        return "(".concat(this._condExpr(b, 'OPERAND1'), " || ").concat(this._condExpr(b, 'OPERAND2'), ")");
-      case 'operator_not':
-        return "(!(".concat(this._condExpr(b, 'OPERAND'), "))");
-      default:
-        return "(".concat(this._inputExpr(block, inputName), " != 0.0)");
-    }
-  }
-  _expr(blockId) {
-    const b = this._block(blockId);
-    if (!b) return '0.0';
-    const op = b.opcode;
-    switch (op) {
-      case 'math_number':
-      case 'math_positive_number':
-      case 'math_whole_number':
-      case 'math_integer':
-      case 'math_angle':
-        return wgslNum(parseFloat(this._getField(b, 'NUM')) || 0);
-      case 'text':
-        {
-          const n = parseFloat(this._getField(b, 'TEXT'));
-          return wgslNum(isFinite(n) ? n : 0);
-        }
-      case 'data_variable':
-        {
-          const name = this._getField(b, 'VARIABLE');
-          if (String(name).toLowerCase() === 'color') return 'sc_color';
-          return this._uid(name, 'sc_v_');
-        }
-      case 'sensing_timer':
-        return 'u.u_time';
-      case 'argument_reporter_string_number':
-      case 'argument_reporter_boolean':
-        {
-          const name = String(this._getField(b, 'VALUE'));
-          const mapped = this._scope && this._scope.get(name);
-          if (mapped) return mapped;
-          this.warnings.push("Argument reporter \"".concat(name, "\" is not a parameter of this block; using 0."));
-          return '0.0';
-        }
-      case 'operator_add':
-        {
-          const aLit = this._literalValue(b, 'NUM1');
-          const bLit = this._literalValue(b, 'NUM2');
-          if (aLit !== null && bLit !== null) return wgslNum(aLit + bLit);
-          if (aLit === 0) return this._inputExpr(b, 'NUM2');
-          if (bLit === 0) return this._inputExpr(b, 'NUM1');
-          return "(".concat(this._inputExpr(b, 'NUM1'), " + ").concat(this._inputExpr(b, 'NUM2'), ")");
-        }
-      case 'operator_subtract':
-        {
-          const aLit = this._literalValue(b, 'NUM1');
-          const bLit = this._literalValue(b, 'NUM2');
-          if (aLit !== null && bLit !== null) return wgslNum(aLit - bLit);
-          if (bLit === 0) return this._inputExpr(b, 'NUM1');
-          return "(".concat(this._inputExpr(b, 'NUM1'), " - ").concat(this._inputExpr(b, 'NUM2'), ")");
-        }
-      case 'operator_multiply':
-        {
-          const aLit = this._literalValue(b, 'NUM1');
-          const bLit = this._literalValue(b, 'NUM2');
-          if (aLit !== null && bLit !== null) return wgslNum(aLit * bLit);
-          if (aLit === 0 || bLit === 0) return '0.0';
-          if (aLit === 1) return this._inputExpr(b, 'NUM2');
-          if (bLit === 1) return this._inputExpr(b, 'NUM1');
-          return "(".concat(this._inputExpr(b, 'NUM1'), " * ").concat(this._inputExpr(b, 'NUM2'), ")");
-        }
-      case 'operator_divide':
-        {
-          const aLit = this._literalValue(b, 'NUM1');
-          const bLit = this._literalValue(b, 'NUM2');
-          if (aLit !== null && bLit !== null && bLit !== 0) return wgslNum(aLit / bLit);
-          if (aLit === 0) return '0.0';
-          const a = this._inputExpr(b, 'NUM1');
-          const d = this._inputExpr(b, 'NUM2');
-          if (bLit !== null && bLit !== 0) {
-            return "(".concat(a, " / ").concat(d, ")");
-          }
-          return "select(1e20, ".concat(a, " / ").concat(d, ", ").concat(d, " != 0.0)");
-        }
-      case 'operator_mod':
-        {
-          const a = this._inputExpr(b, 'NUM1');
-          const d = this._inputExpr(b, 'NUM2');
-          const dLit = this._literalValue(b, 'NUM2');
-          if (dLit !== null && dLit !== 0) {
-            return "sc_mod(".concat(a, ", ").concat(d, ")");
-          }
-          return "select(0.0, sc_mod(".concat(a, ", ").concat(d, "), ").concat(d, " != 0.0)");
-        }
-      case 'operator_round':
-        return "floor(".concat(this._inputExpr(b, 'NUM'), " + 0.5)");
-      case 'operator_mathop':
-        {
-          const which = String(this._getField(b, 'OPERATOR') || '').toLowerCase();
-          const n = this._inputExpr(b, 'NUM');
-          switch (which) {
-            case 'abs':
-              return "abs(".concat(n, ")");
-            case 'floor':
-              return "floor(".concat(n, ")");
-            case 'ceiling':
-              return "ceil(".concat(n, ")");
-            case 'sqrt':
-              return "sqrt(".concat(n, ")");
-            case 'sin':
-              return "sin((".concat(n, ") * 0.017453292519943295)");
-            case 'cos':
-              return "cos((".concat(n, ") * 0.017453292519943295)");
-            case 'tan':
-              return "tan((".concat(n, ") * 0.017453292519943295)");
-            case 'asin':
-              return "asin(".concat(n, ") * 57.29577951308232");
-            case 'acos':
-              return "acos(".concat(n, ") * 57.29577951308232");
-            case 'atan':
-              return "atan(".concat(n, ") * 57.29577951308232");
-            case 'ln':
-              return "log(".concat(n, ")");
-            case 'log':
-              return "log(".concat(n, ") / 2.302585092994046");
-            case 'e ^':
-              return "exp(".concat(n, ")");
-            case '10 ^':
-              return "pow(10.0, ".concat(n, ")");
-            default:
-              this.warnings.push("Unknown math op \"".concat(which, "\"; using 0."));
-              return '0.0';
-          }
-        }
-      case 'operator_random':
-        {
-          const a = this._inputExpr(b, 'FROM');
-          const bb = this._inputExpr(b, 'TO');
-          const seed = this._randCounter++;
-          return "mix(".concat(a, ", ").concat(bb, ", sc_rand(vec3f(sc_frag_coord, u.u_time + ").concat(seed, ".0)))");
-        }
-      case 'operator_lt':
-        return "select(0.0, 1.0, ".concat(this._inputExpr(b, 'OPERAND1'), " < ").concat(this._inputExpr(b, 'OPERAND2'), ")");
-      case 'operator_gt':
-        return "select(0.0, 1.0, ".concat(this._inputExpr(b, 'OPERAND1'), " > ").concat(this._inputExpr(b, 'OPERAND2'), ")");
-      case 'operator_equals':
-        return "select(0.0, 1.0, abs(".concat(this._inputExpr(b, 'OPERAND1'), " - ").concat(this._inputExpr(b, 'OPERAND2'), ") < 0.000001)");
-      case 'operator_and':
-        return "select(0.0, 1.0, ".concat(this._condExpr(b, 'OPERAND1'), " && ").concat(this._condExpr(b, 'OPERAND2'), ")");
-      case 'operator_or':
-        return "select(0.0, 1.0, ".concat(this._condExpr(b, 'OPERAND1'), " || ").concat(this._condExpr(b, 'OPERAND2'), ")");
-      case 'operator_not':
-        return "select(0.0, 1.0, !(".concat(this._condExpr(b, 'OPERAND'), "))");
-      case 'procedures_call':
-        {
-          const isReporter = b.mutation && b.mutation.return;
-          if (!isReporter) {
-            this.warnings.push("Custom command used as a reporter; using 0.");
-            return '0.0';
-          }
-          const proccode = b.mutation && b.mutation.proccode;
-          if (!proccode || !this._procedures.has(proccode)) {
-            this.warnings.push("Call to unknown custom reporter: ".concat(proccode));
-            return '0.0';
-          }
-          const fnName = this._uid(proccode, 'sc_fn_');
-          const argIds = this._parseArgIds(b);
-          const args = argIds.map(aid => this._inputExpr(b, aid));
-          return "".concat(fnName, "(").concat(args.join(', '), ")");
-        }
-      case 'data_itemoflist':
-        {
-          const name = this._getField(b, 'LIST');
-          const idx = this._inputExpr(b, 'INDEX');
-          if (this._isMutableList(name)) {
-            const rfn = this._mutableReaderName.get(name);
-            return "".concat(rfn, "(").concat(idx, ")");
-          }
-          const slot = this._listSlot.get(name);
-          if (!slot) {
-            this.warnings.push("List \"".concat(name, "\" is written but never read in shader; returning 0."));
-            return '0.0';
-          }
-          return "sc_lget_".concat(slot.texIndex, "_").concat(slot.channel, "(").concat(idx, ")");
-        }
-      case 'data_lengthoflist':
-        {
-          const name = this._getField(b, 'LIST');
-          if (this._isMutableList(name)) {
-            return this._mutableLenName(name);
-          }
-          const slot = this._listSlot.get(name);
-          if (!slot) return '0.0';
-          const swiz = ['x', 'y', 'z', 'w'][slot.channel];
-          return "u.sc_llen_".concat(slot.texIndex, ".").concat(swiz);
-        }
-      default:
-        if (op && op.startsWith('data_')) {
-          this.warnings.push("Unsupported data reporter treated as 0: ".concat(op));
-          return '0.0';
-        }
-        this.warnings.push("Unsupported reporter treated as 0: ".concat(op));
-        return '0.0';
-    }
-  }
-}
-/* harmony default export */ __webpack_exports__["default"] = (ShaderCompilerWGSL);
-
-/***/ }),
-
 /***/ "./src/shader-compiler.js":
 /*!********************************!*\
   !*** ./src/shader-compiler.js ***!
@@ -87983,6 +87142,13 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ScratchShaderCompiler", function() { return ScratchShaderCompiler; });
 const PIXEL_NAME = 'pixel';
 const MAX_LOOP = 256;
+// A `forever` block in Scratch is unwound into a `for` loop with this
+// upper bound. The BVH traversal is itself a `forever`, so this must be
+// large enough to finish visiting every node the BVH might emit before
+// a hit. 64 was not enough for the uow5 BVH (which can legitimately
+// push dozens of nodes onto the stack) and silently truncated the
+// traversal, leaving whole regions of the scene unlit.
+const MAX_FOREVER = 4096;
 const MAX_UNROLL = 128;
 const SUBSTACK_INPUTS = new Set(['SUBSTACK', 'SUBSTACK2', 'SUBSTACK3']);
 const sanitize = (logical, prefix) => {
@@ -88032,6 +87198,7 @@ class ScratchShaderCompiler {
     this._listInitialLengths = new Map();
     this._globalMutableArrays = [];
     this._mutableReaderName = new Map();
+    this._proceduresUsingStack = new Set();
   }
   _uid(logical, prefix) {
     const key = prefix + '|' + logical;
@@ -88368,6 +87535,11 @@ class ScratchShaderCompiler {
       });
     }
     this._collectMutableLists();
+    for (const [code, info] of this._procedures) {
+      if (this._procedureWritesMutableList(info)) {
+        this._proceduresUsingStack.add(code);
+      }
+    }
   }
   _collectMutableLists() {
     // The capacity of a mutable (read+write) GLSL array. The sb3's
@@ -88379,7 +87551,7 @@ class ScratchShaderCompiler {
     // demand, so we have to over-provision the shader's fixed-size array
     // to keep the two executions in lock-step. 1024 covers any BVH that
     // fits in a 480x360 stage without degenerating into a linked list.
-    const MUTABLE_CAP_DEFAULT = 256;
+    const MUTABLE_CAP_DEFAULT = 1024;
     const MUTABLE_CAP_MAX = 1024;
     this._collectListInitialLengths();
     this._mutableListNames = new Set();
@@ -88393,6 +87565,19 @@ class ScratchShaderCompiler {
         this._mutableListSizes.set(name, cap);
       }
     }
+  }
+  _procedureWritesMutableList(info) {
+    let found = false;
+    this._walkAll(info.bodyHead, info.blocks, b => {
+      if (found) return;
+      if (b.opcode === 'data_replaceitemoflist' || b.opcode === 'data_addtolist' || b.opcode === 'data_insertatlist' || b.opcode === 'data_deleteoflist' || b.opcode === 'data_deletealloflist') {
+        const name = this._getField(b, 'LIST');
+        if (name && this._mutableListNames && this._mutableListNames.has(name)) {
+          found = true;
+        }
+      }
+    });
+    return found;
   }
   _generateVertex() {
     return ['attribute vec2 a_pos;', 'void main() {', '  gl_Position = vec4(a_pos, 0.0, 1.0);', '}'].join('\n');
@@ -88478,7 +87663,7 @@ class ScratchShaderCompiler {
         lines.push("  float gi = clamp(idx - 1.0, 0.0, ".concat(len, " - 1.0);"));
         lines.push("  float result = 0.0;");
         lines.push("  for (int mi = 0; mi < ".concat(cap, "; mi++) {"));
-        lines.push("    if (float(mi) == gi) { result = ".concat(arr, "[mi]; break; }"));
+        lines.push("    if (float(mi) == gi) result = ".concat(arr, "[mi];"));
         lines.push("  }");
         lines.push("  return result;");
         lines.push("}");
@@ -88618,6 +87803,16 @@ class ScratchShaderCompiler {
     for (const p of info.paramNames) {
       this._scope.set(String(p), this._uid(p, 'sc_a_'));
     }
+    // Per-ray mutable list(s) act as global scratch space shared across calls.
+    // Any procedure that writes to one must start with a clean length to avoid
+    // inheriting leftover state from a previous invocation (e.g. the BVH
+    // traversal "stack" leaking between bounces in a path tracer).
+    if (this._proceduresUsingStack && this._proceduresUsingStack.has(code)) {
+      for (const name of this._mutableListNames) {
+        const len = this._mutableLenName(name);
+        lines.push("  ".concat(len, " = 0.0;"));
+      }
+    }
     const body = this._stmts(info.bodyHead, '  ');
     if (body) lines.push(body);
     if (info.isReporter) {
@@ -88658,23 +87853,21 @@ class ScratchShaderCompiler {
       case 'data_changevariableby':
         {
           const name = this._getField(b, 'VARIABLE');
-          const valLit = this._literalValue(b, 'VALUE');
-          if (valLit === 0) return "".concat(ind);
           const val = this._inputExpr(b, 'VALUE');
           return "".concat(ind).concat(this._varTarget(name), " += ").concat(val, ";");
         }
       case 'control_if':
         {
-          const cond = this._condExpr(b, 'CONDITION');
+          const cond = this._inputExpr(b, 'CONDITION');
           const body = this._substack(b, 'SUBSTACK', ind + '  ');
-          return "".concat(ind, "if (").concat(cond, ") {\n").concat(body, "\n").concat(ind, "}");
+          return "".concat(ind, "if (").concat(cond, " != 0.0) {\n").concat(body, "\n").concat(ind, "}");
         }
       case 'control_if_else':
         {
-          const cond = this._condExpr(b, 'CONDITION');
+          const cond = this._inputExpr(b, 'CONDITION');
           const body1 = this._substack(b, 'SUBSTACK', ind + '  ');
           const body2 = this._substack(b, 'SUBSTACK2', ind + '  ');
-          return "".concat(ind, "if (").concat(cond, ") {\n").concat(body1, "\n").concat(ind, "} else {\n").concat(body2, "\n").concat(ind, "}");
+          return "".concat(ind, "if (").concat(cond, " != 0.0) {\n").concat(body1, "\n").concat(ind, "} else {\n").concat(body2, "\n").concat(ind, "}");
         }
       case 'control_repeat':
         {
@@ -88691,17 +87884,17 @@ class ScratchShaderCompiler {
         }
       case 'control_repeat_until':
         {
-          const cond = this._condExpr(b, 'CONDITION');
+          const cond = this._inputExpr(b, 'CONDITION');
           const body = this._substack(b, 'SUBSTACK', ind + '  ');
           const lv = this._loopVar();
-          return "".concat(ind, "for (int ").concat(lv, " = 0; ").concat(lv, " < ").concat(MAX_LOOP, "; ").concat(lv, "++) {\n").concat(ind, "  if (").concat(cond, ") break;\n").concat(body, "\n").concat(ind, "}");
+          return "".concat(ind, "for (int ").concat(lv, " = 0; ").concat(lv, " < ").concat(MAX_LOOP, "; ").concat(lv, "++) {\n").concat(ind, "  if (").concat(cond, " != 0.0) break;\n").concat(body, "\n").concat(ind, "}");
         }
       case 'control_while':
         {
-          const cond = this._condExpr(b, 'CONDITION');
+          const cond = this._inputExpr(b, 'CONDITION');
           const body = this._substack(b, 'SUBSTACK', ind + '  ');
           const lv = this._loopVar();
-          return "".concat(ind, "for (int ").concat(lv, " = 0; ").concat(lv, " < ").concat(MAX_LOOP, "; ").concat(lv, "++) {\n").concat(ind, "  if (!(").concat(cond, ")) break;\n").concat(body, "\n").concat(ind, "}");
+          return "".concat(ind, "for (int ").concat(lv, " = 0; ").concat(lv, " < ").concat(MAX_LOOP, "; ").concat(lv, "++) {\n").concat(ind, "  if (").concat(cond, " == 0.0) break;\n").concat(body, "\n").concat(ind, "}");
         }
       case 'control_for_each':
         {
@@ -88748,9 +87941,15 @@ class ScratchShaderCompiler {
         }
       case 'control_forever':
         {
+          // "forever" has no exit condition in Scratch; in the shader we bound it
+          // to a fixed iteration count. The loop body typically exits via
+          // "control_stop (this script)" which compiles to `return;`, terminating
+          // the whole function (and thus the loop) early. Forever loops in
+          // particular can be very heavy on a GPU, so we use a smaller bound
+          // (MAX_FOREVER) than for ordinary repeat/while loops.
           const foreverBody = this._substack(b, 'SUBSTACK', ind + '  ');
           const fv = this._loopVar();
-          return "".concat(ind, "for (int ").concat(fv, " = 0; ").concat(fv, " < ").concat(MAX_LOOP, "; ").concat(fv, "++) {\n").concat(foreverBody, "\n").concat(ind, "}");
+          return "".concat(ind, "for (int ").concat(fv, " = 0; ").concat(fv, " < ").concat(MAX_FOREVER, "; ").concat(fv, "++) {\n").concat(foreverBody, "\n").concat(ind, "}");
         }
       case 'control_wait':
       case 'control_wait_until':
@@ -88778,7 +87977,7 @@ class ScratchShaderCompiler {
           // We previously used `clamp(idx, 1, len)` here, which incorrectly
           // turned out-of-range indices into writes at position `len`. That
           // silently corrupted the BVH stack and made many pixels render wrong.
-          return ["".concat(ind, "for (int ").concat(iv, " = 0; ").concat(iv, " < ").concat(cap, "; ").concat(iv, "++) {"), "".concat(ind, "  float ci = float(").concat(iv, " + 1);"), "".concat(ind, "  float ").concat(ridx, " = floor(").concat(idx, " + 0.5);"), "".concat(ind, "  if (ci == ").concat(ridx, " && ").concat(idx, " >= 1.0 && ").concat(idx, " <= ").concat(len, ") {"), "".concat(ind, "    ").concat(arr, "[").concat(iv, "] = ").concat(val, ";"), "".concat(ind, "    break;"), "".concat(ind, "  } else if (ci == ").concat(len, " + 1.0 && ci <= float(").concat(cap, ") && ").concat(ridx, " == ci) {"), "".concat(ind, "    ").concat(arr, "[").concat(iv, "] = ").concat(val, ";"), "".concat(ind, "    ").concat(len, " = ").concat(len, " + 1.0;"), "".concat(ind, "    break;"), "".concat(ind, "  }"), "".concat(ind, "}")].join('\n');
+          return ["".concat(ind, "for (int ").concat(iv, " = 0; ").concat(iv, " < ").concat(cap, "; ").concat(iv, "++) {"), "".concat(ind, "  float ci = float(").concat(iv, " + 1);"), "".concat(ind, "  float ").concat(ridx, " = floor(").concat(idx, " + 0.5);"), "".concat(ind, "  if (ci == ").concat(ridx, " && ").concat(idx, " >= 1.0 && ").concat(idx, " <= ").concat(len, ") {"), "".concat(ind, "    ").concat(arr, "[").concat(iv, "] = ").concat(val, ";"), "".concat(ind, "  } else if (ci == ").concat(len, " + 1.0 && ci <= float(").concat(cap, ") && ").concat(ridx, " == ci) {"), "".concat(ind, "    ").concat(arr, "[").concat(iv, "] = ").concat(val, ";"), "".concat(ind, "    ").concat(len, " = ").concat(len, " + 1.0;"), "".concat(ind, "  }"), "".concat(ind, "}")].join('\n');
         }
       case 'data_addtolist':
         {
@@ -88864,76 +88063,42 @@ class ScratchShaderCompiler {
     }
     return null;
   }
-  _literalValue(block, inputName) {
-    const input = block.inputs && block.inputs[inputName];
-    if (!input) return null;
-    const childId = this._inputChild(input);
-    if (!childId) return null;
-    return this._exprLiteral(childId);
-  }
-  _exprLiteral(blockId) {
-    if (!blockId) return null;
-    const b = this._block(blockId);
-    if (!b) return null;
-    const op = b.opcode;
-    if (['math_number', 'math_positive_number', 'math_whole_number', 'math_integer', 'math_angle'].includes(op)) {
-      return parseNum(this._getField(b, 'NUM'));
-    }
-    if (op === 'text') {
-      return parseNum(this._getField(b, 'TEXT'));
-    }
-    if (op === 'operator_add') {
-      const a = this._exprLiteral(this._inputChild(b.inputs.NUM1));
-      const d = this._exprLiteral(this._inputChild(b.inputs.NUM2));
-      if (a !== null && d !== null) return a + d;
-    } else if (op === 'operator_subtract') {
-      const a = this._exprLiteral(this._inputChild(b.inputs.NUM1));
-      const d = this._exprLiteral(this._inputChild(b.inputs.NUM2));
-      if (a !== null && d !== null) return a - d;
-    } else if (op === 'operator_multiply') {
-      const a = this._exprLiteral(this._inputChild(b.inputs.NUM1));
-      const d = this._exprLiteral(this._inputChild(b.inputs.NUM2));
-      if (a !== null && d !== null) return a * d;
-    } else if (op === 'operator_divide') {
-      const a = this._exprLiteral(this._inputChild(b.inputs.NUM1));
-      const d = this._exprLiteral(this._inputChild(b.inputs.NUM2));
-      if (a !== null && d !== null && d !== 0) return a / d;
-    }
-    return null;
-  }
   _inputExpr(block, inputName) {
     const input = block.inputs && block.inputs[inputName];
     const childId = this._inputChild(input);
-    if (!childId) return '0.0';
+    if (!childId) {
+      if (this._isDistanceArgument(block, inputName)) return '1e20';
+      return '0.0';
+    }
+    if (this._isEmptyDistanceInput(block, inputName, input)) {
+      return '1e20';
+    }
     return this._expr(childId);
   }
-  _condExpr(block, inputName) {
-    const input = block.inputs && block.inputs[inputName];
-    const childId = this._inputChild(input);
-    if (!childId) {
-      return "(".concat(this._inputExpr(block, inputName), " != 0.0)");
+  _isEmptyDistanceInput(block, inputName, input) {
+    if (!this._isDistanceArgument(block, inputName)) return false;
+    if (!input) return true;
+    const hasExplicitBlock = input.block !== null && input.block !== undefined && input.block !== input.shadow;
+    return !hasExplicitBlock;
+  }
+  _isDistanceArgument(block, inputName) {
+    if (!block || block.opcode !== 'procedures_call') return false;
+    if (!block.mutation || !block.mutation.argumentids) return false;
+    let ids;
+    try {
+      ids = JSON.parse(block.mutation.argumentids);
+    } catch (e) {
+      return false;
     }
-    const b = this._block(childId);
-    if (!b) {
-      return "(".concat(this._inputExpr(block, inputName), " != 0.0)");
-    }
-    const op = b.opcode;
-    switch (op) {
-      case 'operator_lt':
-        return "(".concat(this._inputExpr(b, 'OPERAND1'), " < ").concat(this._inputExpr(b, 'OPERAND2'), ")");
-      case 'operator_gt':
-        return "(".concat(this._inputExpr(b, 'OPERAND1'), " > ").concat(this._inputExpr(b, 'OPERAND2'), ")");
-      case 'operator_equals':
-        return "(abs(".concat(this._inputExpr(b, 'OPERAND1'), " - ").concat(this._inputExpr(b, 'OPERAND2'), ") < 0.000001)");
-      case 'operator_and':
-        return "(".concat(this._condExpr(b, 'OPERAND1'), " && ").concat(this._condExpr(b, 'OPERAND2'), ")");
-      case 'operator_or':
-        return "(".concat(this._condExpr(b, 'OPERAND1'), " || ").concat(this._condExpr(b, 'OPERAND2'), ")");
-      case 'operator_not':
-        return "(!(".concat(this._condExpr(b, 'OPERAND'), "))");
-      default:
-        return "(".concat(this._inputExpr(block, inputName), " != 0.0)");
-    }
+    const idx = ids.indexOf(inputName);
+    if (idx < 0) return false;
+    const proccode = block.mutation.proccode;
+    if (!proccode || !this._procedures.has(proccode)) return false;
+    const info = this._procedures.get(proccode);
+    const name = info.paramNames && info.paramNames[idx];
+    if (!name) return false;
+    const lower = String(name).toLowerCase();
+    return lower === 'dist' || lower === 'distance';
   }
   _expr(blockId) {
     const b = this._block(blockId);
@@ -88969,53 +88134,29 @@ class ScratchShaderCompiler {
           return '0.0';
         }
       case 'operator_add':
-        {
-          const aLit = this._literalValue(b, 'NUM1');
-          const bLit = this._literalValue(b, 'NUM2');
-          if (aLit !== null && bLit !== null) return glslNum(aLit + bLit);
-          if (aLit === 0) return this._inputExpr(b, 'NUM2');
-          if (bLit === 0) return this._inputExpr(b, 'NUM1');
-          return "(".concat(this._inputExpr(b, 'NUM1'), " + ").concat(this._inputExpr(b, 'NUM2'), ")");
-        }
+        return "(".concat(this._inputExpr(b, 'NUM1'), " + ").concat(this._inputExpr(b, 'NUM2'), ")");
       case 'operator_subtract':
-        {
-          const aLit = this._literalValue(b, 'NUM1');
-          const bLit = this._literalValue(b, 'NUM2');
-          if (aLit !== null && bLit !== null) return glslNum(aLit - bLit);
-          if (bLit === 0) return this._inputExpr(b, 'NUM1');
-          return "(".concat(this._inputExpr(b, 'NUM1'), " - ").concat(this._inputExpr(b, 'NUM2'), ")");
-        }
+        return "(".concat(this._inputExpr(b, 'NUM1'), " - ").concat(this._inputExpr(b, 'NUM2'), ")");
       case 'operator_multiply':
-        {
-          const aLit = this._literalValue(b, 'NUM1');
-          const bLit = this._literalValue(b, 'NUM2');
-          if (aLit !== null && bLit !== null) return glslNum(aLit * bLit);
-          if (aLit === 0 || bLit === 0) return '0.0';
-          if (aLit === 1) return this._inputExpr(b, 'NUM2');
-          if (bLit === 1) return this._inputExpr(b, 'NUM1');
-          return "(".concat(this._inputExpr(b, 'NUM1'), " * ").concat(this._inputExpr(b, 'NUM2'), ")");
-        }
+        return "(".concat(this._inputExpr(b, 'NUM1'), " * ").concat(this._inputExpr(b, 'NUM2'), ")");
       case 'operator_divide':
         {
-          const aLit = this._literalValue(b, 'NUM1');
-          const bLit = this._literalValue(b, 'NUM2');
-          if (aLit !== null && bLit !== null && bLit !== 0) return glslNum(aLit / bLit);
-          if (aLit === 0) return '0.0';
           const a = this._inputExpr(b, 'NUM1');
           const d = this._inputExpr(b, 'NUM2');
-          if (bLit !== null && bLit !== 0) {
-            return "(".concat(a, " / ").concat(d, ")");
-          }
+          // Scratch's `1 / 0` is `Infinity`, but `1.0 / 0.0` in GLSL ES 1.00
+          // is undefined behavior. Returning `0.0` was tempting but it broke
+          // the BVH slab test: when `rayDX == 0`, the X slab's
+          // `t_near` and `t_far` both collapsed to `0 * (boundary - ox) = 0`,
+          // so the combined slab test always reported a miss for any
+          // axis-aligned ray, hiding entire walls/regions of the scene.
+          // Returning `1e20` mimics Scratch's `Infinity` propagation, so
+          // `a * 1e20` then yields the correct ±Infinity for the slab test.
           return "((".concat(d, " == 0.0) ? 1e20 : (").concat(a, " / ").concat(d, "))");
         }
       case 'operator_mod':
         {
           const a = this._inputExpr(b, 'NUM1');
           const d = this._inputExpr(b, 'NUM2');
-          const dLit = this._literalValue(b, 'NUM2');
-          if (dLit !== null && dLit !== 0) {
-            return "mod(".concat(a, ", ").concat(d, ")");
-          }
           return "((".concat(d, " == 0.0) ? 0.0 : mod(").concat(a, ", ").concat(d, "))");
         }
       case 'operator_round':
@@ -89138,360 +88279,6 @@ class ScratchShaderCompiler {
 
 /***/ }),
 
-/***/ "./src/shader-renderer-webgpu.js":
-/*!***************************************!*\
-  !*** ./src/shader-renderer-webgpu.js ***!
-  \***************************************/
-/*! exports provided: default */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-class WebGPURenderer {
-  constructor(canvas) {
-    this.canvas = canvas;
-    this._device = null;
-    this._context = null;
-    this._pipeline = null;
-    this._uniformBuffer = null;
-    this._listBuffer = null;
-    this._bindGroup = null;
-    this._compiled = null;
-    this._readVariable = () => 0;
-    this._readList = () => null;
-    this._startTime = 0;
-    this._running = false;
-    this._rafId = null;
-    this._glStateReady = false;
-    this._readVariableCache = () => ({});
-    this._listDataCache = null;
-    this._uniformData = null;
-    this._lastW = -1;
-    this._lastH = -1;
-    this._lastTime = -1;
-    this._lastVarVals = {};
-    this._uniformListBase = 0;
-  }
-  async init() {
-    if (!navigator.gpu) {
-      throw new Error('WebGPU is not available.');
-    }
-    const adapter = await navigator.gpu.requestAdapter();
-    if (!adapter) {
-      throw new Error('No suitable GPU adapter found.');
-    }
-    this._device = await adapter.requestDevice();
-    this._context = this.canvas.getContext('webgpu');
-    if (!this._context) {
-      throw new Error('WebGPU canvas context unavailable.');
-    }
-    this._format = navigator.gpu.getPreferredCanvasFormat();
-    this._context.configure({
-      device: this._device,
-      format: this._format,
-      alphaMode: 'premultiplied'
-    });
-    return true;
-  }
-  setProgram(compiled) {
-    const device = this._device;
-    if (!device) return false;
-    this._compiled = compiled;
-    this._glStateReady = false;
-    let module;
-    try {
-      module = device.createShaderModule({
-        code: compiled.wgslSource
-      });
-    } catch (e) {
-      console.error('[scaffolding-shader] WGSL compile error:', e);
-      return false;
-    }
-    if (module.getCompilationInfo) {
-      module.getCompilationInfo().then(info => {
-        for (const m of info.messages) {
-          if (m.type === 'error') {
-            console.error("[scaffolding-shader] WGSL: ".concat(m.message, " (line ").concat(m.lineNum, ")"));
-          } else {
-            console.warn("[scaffolding-shader] WGSL: ".concat(m.message, " (line ").concat(m.lineNum, ")"));
-          }
-        }
-      });
-    }
-    this._pipeline = device.createRenderPipeline({
-      layout: 'auto',
-      vertex: {
-        module,
-        entryPoint: 'vs_main'
-      },
-      fragment: {
-        module,
-        entryPoint: 'fs_main',
-        targets: [{
-          format: this._format
-        }]
-      },
-      primitive: {
-        topology: 'triangle-strip'
-      }
-    });
-    const uniformSize = this._computeUniformSize(compiled);
-    if (this._uniformBuffer) this._uniformBuffer.destroy();
-    this._uniformBuffer = device.createBuffer({
-      size: uniformSize,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-    this._uniformData = new Float32Array(uniformSize / 4);
-    const listSize = this._computeListBufferSize(compiled);
-    if (listSize > 0) {
-      if (this._listBuffer) this._listBuffer.destroy();
-      this._listBuffer = device.createBuffer({
-        size: listSize,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-      });
-    }
-    this._bindGroup = device.createBindGroup({
-      layout: this._pipeline.getBindGroupLayout(0),
-      entries: this._buildBindGroupEntries()
-    });
-    return true;
-  }
-  _computeUniformSize(compiled) {
-    let count = 2;
-    count += compiled.variableUniforms.length;
-    if (compiled.listTextures && compiled.listTextures.length) {
-      count += 2;
-      const maxTexIndex = compiled.listTextures.reduce((m, s) => Math.max(m, s.texIndex), -1);
-      count += (maxTexIndex + 1) * 7;
-    }
-    let size = count * 4;
-    size = Math.max(16, Math.ceil(size / 16) * 16);
-    return size;
-  }
-  _computeListBufferSize(compiled) {
-    if (!compiled.listTextures || !compiled.listTextures.length) return 0;
-    const maxTexIndex = compiled.listTextures.reduce((m, s) => Math.max(m, s.texIndex), -1);
-    const numPacks = maxTexIndex + 1;
-    if (!numPacks) return 0;
-    return 1024 * 1024 * 4 * 4;
-  }
-  _buildBindGroupEntries() {
-    const entries = [{
-      binding: 0,
-      resource: {
-        buffer: this._uniformBuffer
-      }
-    }];
-    if (this._listBuffer) {
-      entries.push({
-        binding: 1,
-        resource: {
-          buffer: this._listBuffer
-        }
-      });
-    }
-    return entries;
-  }
-  setVariableCacheProvider(fn) {
-    this._readVariableCache = fn || (() => ({}));
-  }
-  setListReader(fn) {
-    this._readList = fn || (() => null);
-  }
-  uploadListData() {
-    if (!this._compiled || !this._compiled.listTextures) return;
-    if (!this._listBuffer || !this._device) return;
-    const listSpecs = this._compiled.listTextures;
-    const maxTexIndex = listSpecs.reduce((m, s) => Math.max(m, s.texIndex), -1);
-    const numPacks = maxTexIndex + 1;
-    if (!numPacks) return;
-    let maxLen = 1;
-    const packInfo = new Array(numPacks).fill(null);
-    for (let pi = 0; pi < numPacks; pi++) {
-      const channels = [null, null, null, null];
-      for (const spec of listSpecs) {
-        if (spec.texIndex !== pi) continue;
-        const data = this._readList(spec.scratchName);
-        if (!data) continue;
-        channels[spec.channel] = {
-          name: spec.scratchName,
-          data
-        };
-        if (data.length > maxLen) maxLen = data.length;
-      }
-      packInfo[pi] = channels;
-    }
-    const width = Math.min(maxLen, 2048);
-    const packHeights = packInfo.map(channels => {
-      let len = 1;
-      for (const ch of channels) {
-        if (ch && ch.data.length > len) len = ch.data.length;
-      }
-      return Math.max(1, Math.ceil(len / width));
-    });
-    let totalHeight = 0;
-    const offsets = [];
-    for (const h of packHeights) {
-      offsets.push(totalHeight);
-      totalHeight += h;
-    }
-    const texels = width * totalHeight;
-    const buf = new Float32Array(texels * 4);
-    for (let pi = 0; pi < packInfo.length; pi++) {
-      const channels = packInfo[pi];
-      const yOffset = offsets[pi];
-      for (let c = 0; c < 4; c++) {
-        const ch = channels[c];
-        if (!ch) continue;
-        const data = ch.data;
-        const maxItems = width * packHeights[pi];
-        for (let i = 0; i < data.length && i < maxItems; i++) {
-          const x = i % width;
-          const y = yOffset + Math.floor(i / width);
-          buf[(y * width + x) * 4 + c] = data[i];
-        }
-      }
-    }
-    const byteLength = buf.byteLength;
-    const padded = Math.ceil(byteLength / 16) * 16;
-    if (padded !== byteLength) {
-      const paddedBuf = new Float32Array(padded / 4);
-      paddedBuf.set(buf);
-      this._device.queue.writeBuffer(this._listBuffer, 0, paddedBuf);
-    } else {
-      this._device.queue.writeBuffer(this._listBuffer, 0, buf);
-    }
-    this._listPackInfo = packInfo.map((channels, pi) => {
-      const lengths = [0, 0, 0, 0];
-      for (let c = 0; c < 4; c++) {
-        if (channels[c]) lengths[c] = channels[c].data.length;
-      }
-      return {
-        offset: offsets[pi],
-        height: packHeights[pi],
-        lengths
-      };
-    });
-    this._listWidth = width;
-    this._listTotalHeight = totalHeight;
-  }
-  resize(width, height) {
-    const w = Math.max(1, Math.floor(width));
-    const h = Math.max(1, Math.floor(height));
-    if (this.canvas.width !== w) this.canvas.width = w;
-    if (this.canvas.height !== h) this.canvas.height = h;
-  }
-  resetTime() {
-    this._startTime = performance.now();
-  }
-  getTime() {
-    return (performance.now() - this._startTime) / 1000;
-  }
-  start() {
-    if (this._running) return;
-    if (!this._pipeline) return;
-    this._running = true;
-    if (!this._startTime) this._startTime = performance.now();
-    this._loop();
-  }
-  _loop() {
-    this._rafId = requestAnimationFrame(() => {
-      if (!this._running) return;
-      this.render();
-      if (this._running) this._loop();
-    });
-  }
-  stop() {
-    this._running = false;
-    if (this._rafId !== null) {
-      cancelAnimationFrame(this._rafId);
-      this._rafId = null;
-    }
-  }
-  render() {
-    if (!this._pipeline || !this._device) return;
-    const device = this._device;
-    const cache = this._readVariableCache();
-    let off = 0;
-    const w = this.canvas.width;
-    const h = this.canvas.height;
-    const t = this.getTime();
-    let dirty = this._lastW !== w || this._lastH !== h || this._lastTime !== t;
-    this._uniformData[off++] = w;
-    this._uniformData[off++] = h;
-    this._uniformData[off++] = t;
-    this._uniformData[off++] = 0;
-    this._lastW = w;
-    this._lastH = h;
-    this._lastTime = t;
-    for (const v of this._compiled.variableUniforms || []) {
-      const val = cache[v.scratchName] !== undefined ? cache[v.scratchName] : 0;
-      if (this._lastVarVals[v.scratchName] !== val) {
-        this._uniformData[off] = val;
-        this._lastVarVals[v.scratchName] = val;
-        dirty = true;
-      }
-      off++;
-    }
-    if (this._listPackInfo) {
-      this._uniformData[off++] = this._listWidth;
-      this._uniformData[off++] = this._listTotalHeight;
-      this._uniformData[off++] = 0;
-      this._uniformData[off++] = 0;
-      for (let pi = 0; pi < this._listPackInfo.length; pi++) {
-        const pack = this._listPackInfo[pi];
-        this._uniformData[off++] = pack.lengths[0] || 0;
-        this._uniformData[off++] = pack.lengths[1] || 0;
-        this._uniformData[off++] = pack.lengths[2] || 0;
-        this._uniformData[off++] = pack.lengths[3] || 0;
-        this._uniformData[off++] = this._listWidth;
-        this._uniformData[off++] = pack.height;
-        this._uniformData[off++] = pack.offset;
-        this._uniformData[off++] = 0;
-      }
-    }
-    if (dirty) {
-      device.queue.writeBuffer(this._uniformBuffer, 0, this._uniformData.subarray(0, off));
-    }
-    const encoder = device.createCommandEncoder();
-    const view = this._context.getCurrentTexture().createView();
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [{
-        view,
-        clearValue: {
-          r: 0,
-          g: 0,
-          b: 0,
-          a: 0
-        },
-        loadOp: 'clear',
-        storeOp: 'store'
-      }]
-    });
-    pass.setPipeline(this._pipeline);
-    pass.setBindGroup(0, this._bindGroup);
-    pass.draw(4);
-    pass.end();
-    device.queue.submit([encoder.finish()]);
-  }
-  destroy() {
-    this.stop();
-    if (this._uniformBuffer) {
-      this._uniformBuffer.destroy();
-      this._uniformBuffer = null;
-    }
-    if (this._listBuffer) {
-      this._listBuffer.destroy();
-      this._listBuffer = null;
-    }
-    this._pipeline = null;
-    this._device = null;
-  }
-}
-/* harmony default export */ __webpack_exports__["default"] = (WebGPURenderer);
-
-/***/ }),
-
 /***/ "./src/shader-renderer.js":
 /*!********************************!*\
   !*** ./src/shader-renderer.js ***!
@@ -89535,13 +88322,6 @@ class ShaderRenderer {
     this._glErrorCounts = {};
     this._maxGlErrorLog = 16;
     this._rafId = null;
-    this._glStateReady = false;
-    this._uniformCache = null;
-    this._readVariableCache = () => ({});
-    this._listDataCache = null;
-    this._lastVarVals = {};
-    this._lastW = -1;
-    this._lastH = -1;
   }
   getGlErrors() {
     return this._glErrors.slice();
@@ -89569,11 +88349,6 @@ class ShaderRenderer {
     const gl = this.gl;
     this._compiled = compiled;
     if (readVariable) this._readVariable = readVariable;
-    this._glStateReady = false;
-    this._uniformCache = null;
-    this._lastVarVals = {};
-    this._lastW = -1;
-    this._lastH = -1;
     const program = this._link(compiled.vertexSource, compiled.fragmentSource);
     if (!program) return false;
     if (this._program) this.gl.deleteProgram(this._program);
@@ -89596,13 +88371,6 @@ class ShaderRenderer {
     this._prepareListLocations(compiled);
     gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
     gl.bufferData(gl.ARRAY_BUFFER, QUAD, gl.STATIC_DRAW);
-    gl.useProgram(this._program);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
-    gl.enableVertexAttribArray(posLoc);
-    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0, 0, 0, 0);
-    this._glStateReady = true;
     return true;
   }
   setListReader(fn) {
@@ -89614,12 +88382,10 @@ class ShaderRenderer {
     const listSpecs = this._compiled.listTextures;
     const maxTexIndex = listSpecs.reduce((m, s) => Math.max(m, s.texIndex), -1);
     const numPacks = maxTexIndex + 1;
-    if (!numPacks) {
-      this._destroyListTextures();
-      return;
-    }
+    this._destroyListTextures();
+    this._listPackInfo = new Array(numPacks).fill(null);
+    if (!numPacks) return;
     let maxLen = 1;
-    const packInfo = new Array(numPacks).fill(null);
     for (let pi = 0; pi < numPacks; pi++) {
       const channels = [null, null, null, null];
       for (const spec of listSpecs) {
@@ -89632,78 +88398,9 @@ class ShaderRenderer {
         };
         if (data.length > maxLen) maxLen = data.length;
       }
-      packInfo[pi] = channels;
+      this._listPackInfo[pi] = channels;
     }
-    this._listPackInfo = packInfo;
-    const existing = this._listTextures[0];
-    if (existing && existing.width === Math.min(maxLen, MAX_TEX_SIZE)) {
-      this._updateListAtlasInPlace(existing, packInfo, maxLen);
-    } else {
-      this._destroyListTextures();
-      this._createListAtlas(packInfo, maxLen);
-    }
-  }
-  _updateListAtlasInPlace(atlas, packs, maxLen) {
-    const gl = this.gl;
-    const width = atlas.width;
-    const packHeights = packs.map(channels => {
-      let len = 1;
-      for (const ch of channels) {
-        if (ch && ch.data.length > len) len = ch.data.length;
-      }
-      return Math.max(1, Math.ceil(len / width));
-    });
-    let totalHeight = 0;
-    const offsets = [];
-    for (const h of packHeights) {
-      offsets.push(totalHeight);
-      totalHeight += h;
-    }
-    if (totalHeight !== atlas.height) {
-      this._destroyListTextures();
-      this._createListAtlas(packs, maxLen);
-      return;
-    }
-    const texels = width * totalHeight;
-    const buf = new Float32Array(texels * 4);
-    for (let pi = 0; pi < packs.length; pi++) {
-      const channels = packs[pi];
-      const yOffset = offsets[pi];
-      for (let c = 0; c < 4; c++) {
-        const ch = channels[c];
-        if (!ch) continue;
-        const data = ch.data;
-        const maxItems = width * packHeights[pi];
-        for (let i = 0; i < data.length && i < maxItems; i++) {
-          const x = i % width;
-          const y = yOffset + Math.floor(i / width);
-          buf[(y * width + x) * 4 + c] = data[i];
-        }
-      }
-    }
-    gl.bindTexture(gl.TEXTURE_2D, atlas.texture);
-    const type = this._texType;
-    let uploadBuf;
-    if (this._isFloat) {
-      uploadBuf = buf;
-    } else {
-      uploadBuf = new Uint8Array(texels * 4);
-      for (let i = 0; i < buf.length; i++) {
-        uploadBuf[i] = Math.max(0, Math.min(255, Math.round(buf[i])));
-      }
-    }
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, totalHeight, gl.RGBA, type, uploadBuf);
-    atlas.packs = packs.map((channels, pi) => {
-      const lengths = [0, 0, 0, 0];
-      for (let c = 0; c < 4; c++) {
-        if (channels[c]) lengths[c] = channels[c].data.length;
-      }
-      return {
-        offset: offsets[pi],
-        height: packHeights[pi],
-        lengths
-      };
-    });
+    this._createListAtlas(this._listPackInfo, maxLen);
   }
   _createListAtlas(packs, maxLen) {
     const gl = this.gl;
@@ -89874,32 +88571,14 @@ class ShaderRenderer {
   render() {
     const gl = this.gl;
     if (!this._program) return;
-    if (!this._glStateReady) {
-      gl.useProgram(this._program);
-      gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
-      gl.enableVertexAttribArray(this._locations.aPos);
-      gl.vertexAttribPointer(this._locations.aPos, 2, gl.FLOAT, false, 0, 0);
-      this._glStateReady = true;
-      this._lastW = -1;
-      this._lastH = -1;
-      this._lastVarVals = {};
-    }
-    const w = this.canvas.width;
-    const h = this.canvas.height;
-    if (this._lastW !== w || this._lastH !== h) {
-      gl.uniform2f(this._locations.uResolution, w, h);
-      gl.viewport(0, 0, w, h);
-      this._lastW = w;
-      this._lastH = h;
-    }
+    gl.useProgram(this._program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
+    gl.enableVertexAttribArray(this._locations.aPos);
+    gl.vertexAttribPointer(this._locations.aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(this._locations.uResolution, this.canvas.width, this.canvas.height);
     gl.uniform1f(this._locations.uTime, this.getTime());
-    const cache = this._readVariableCache();
     for (const v of this._locations.vars) {
-      const val = cache[v.name] !== undefined ? cache[v.name] : 0;
-      if (this._lastVarVals[v.name] !== val) {
-        gl.uniform1f(v.loc, val);
-        this._lastVarVals[v.name] = val;
-      }
+      gl.uniform1f(v.loc, this._readVariable(v.name));
     }
     const atlas = this._listTextures[0];
     const atlasLoc = this._locations.listAtlas;
@@ -89917,13 +88596,11 @@ class ShaderRenderer {
         gl.uniform3f(loc.lmeta, atlas.width, pack.height, pack.offset);
       }
     }
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-  }
-  invalidateUniformCache() {
-    this._uniformCache = null;
-  }
-  setVariableCacheProvider(fn) {
-    this._readVariableCache = fn || (() => ({}));
+    this._checkGlError('render');
   }
   _destroyListTextures() {
     const gl = this.gl;
