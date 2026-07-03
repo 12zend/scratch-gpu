@@ -42,6 +42,14 @@ class ShaderRenderer {
     this._lastVarVals = {};
     this._lastW = -1;
     this._lastH = -1;
+
+    this._computeProgram = null;
+    this._computeFbo = null;
+    this._computeTexture = null;
+    this._computeWidth = 0;
+    this._computeHeight = 0;
+    this._computeColorBufferFloat = this.gl.getExtension('WEBGL_color_buffer_float');
+    this._computeFloatType = (this._floatExt && this._computeColorBufferFloat) ? this.gl.FLOAT : null;
   }
 
   getGlErrors () {
@@ -74,36 +82,44 @@ class ShaderRenderer {
     this._lastVarVals = {};
     this._lastW = -1;
     this._lastH = -1;
-    const program = this._link(compiled.vertexSource, compiled.fragmentSource);
-    if (!program) return false;
+    const compiledProgram = this._compileProgram(compiled);
+    if (!compiledProgram) return false;
     if (this._program) this.gl.deleteProgram(this._program);
-    this._program = program;
+    this._program = compiledProgram.program;
+    this._locations = compiledProgram.locations;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, QUAD, gl.STATIC_DRAW);
+    gl.useProgram(this._program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
+    gl.enableVertexAttribArray(this._locations.aPos);
+    gl.vertexAttribPointer(this._locations.aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    this._glStateReady = true;
+    return true;
+  }
+
+  _compileProgram (compiled) {
+    const gl = this.gl;
+    const program = this._link(compiled.vertexSource, compiled.fragmentSource);
+    if (!program) return null;
     const posLoc = gl.getAttribLocation(program, 'a_pos');
-    this._locations = {
+    const locations = {
       aPos: posLoc,
       uResolution: gl.getUniformLocation(program, 'u_resolution'),
       uTime: gl.getUniformLocation(program, 'u_time'),
       vars: [],
-      lists: []
+      listAtlas: null
     };
     for (const v of compiled.variableUniforms || []) {
-      this._locations.vars.push({
+      locations.vars.push({
         name: v.scratchName,
         uniform: v.uniform,
         loc: gl.getUniformLocation(program, v.uniform)
       });
     }
-    this._prepareListLocations(compiled);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, QUAD, gl.STATIC_DRAW);
-    gl.useProgram(this._program);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
-    gl.enableVertexAttribArray(posLoc);
-    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0, 0, 0, 0);
-    this._glStateReady = true;
-    return true;
+    locations.listAtlas = this._buildListAtlasLocations(program, compiled.listTextures || []);
+    return { program, locations };
   }
 
   setListReader (fn) {
@@ -139,7 +155,7 @@ class ShaderRenderer {
       this._updateListAtlasInPlace(existing, packInfo, maxLen);
     } else {
       this._destroyListTextures();
-      this._createListAtlas(packInfo, maxLen);
+      this._listTextures = [this._buildListAtlas(packInfo, maxLen)];
     }
   }
 
@@ -161,7 +177,7 @@ class ShaderRenderer {
     }
     if (totalHeight !== atlas.height) {
       this._destroyListTextures();
-      this._createListAtlas(packs, maxLen);
+      this._listTextures = [this._buildListAtlas(packs, maxLen)];
       return;
     }
     const texels = width * totalHeight;
@@ -202,7 +218,7 @@ class ShaderRenderer {
     });
   }
 
-  _createListAtlas (packs, maxLen) {
+  _buildListAtlas (packs, maxLen) {
     const gl = this.gl;
     const width = Math.min(maxLen, MAX_TEX_SIZE);
     const packHeights = packs.map((channels) => {
@@ -253,7 +269,11 @@ class ShaderRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    this._listTextures = [{
+    const err = gl.getError();
+    if (err) {
+      console.error('[scaffolding-shader] Failed to upload list atlas texture:', err);
+    }
+    return {
       texture: tex,
       width,
       height: totalHeight,
@@ -264,30 +284,29 @@ class ShaderRenderer {
         }
         return { offset: offsets[pi], height: packHeights[pi], lengths };
       })
-    }];
-    const err = gl.getError();
-    if (err) {
-      console.error('[scaffolding-shader] Failed to upload list atlas texture:', err);
-    }
+    };
   }
 
   _prepareListLocations (compiled) {
+    this._locations.listAtlas = this._buildListAtlasLocations(this._program, compiled.listTextures || []);
+  }
+
+  _buildListAtlasLocations (program, listSpecs) {
     const gl = this.gl;
-    const program = this._program;
-    const listSpecs = compiled.listTextures || [];
     const maxTexIndex = listSpecs.reduce((m, s) => Math.max(m, s.texIndex), -1);
-    this._locations.listAtlas = {
+    const listAtlas = {
       tex: gl.getUniformLocation(program, 'sc_ltex'),
       size: gl.getUniformLocation(program, 'sc_ltex_size'),
       sizeInv: gl.getUniformLocation(program, 'sc_ltex_size_inv'),
       packs: []
     };
     for (let pi = 0; pi <= maxTexIndex; pi++) {
-      this._locations.listAtlas.packs.push({
+      listAtlas.packs.push({
         llen: gl.getUniformLocation(program, `sc_llen_${pi}`),
         lmeta: gl.getUniformLocation(program, `sc_lmeta_${pi}`)
       });
     }
+    return listAtlas;
   }
 
   _compileShader (type, src) {
@@ -423,6 +442,135 @@ class ShaderRenderer {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
+  _collectPackInfo (compiled, readList) {
+    readList = readList || this._readList;
+    const listSpecs = compiled.listTextures || [];
+    const maxTexIndex = listSpecs.reduce((m, s) => Math.max(m, s.texIndex), -1);
+    const numPacks = maxTexIndex + 1;
+    if (!numPacks) return null;
+    let maxLen = 1;
+    const packInfo = new Array(numPacks).fill(null);
+    for (let pi = 0; pi < numPacks; pi++) {
+      const channels = [null, null, null, null];
+      for (const spec of listSpecs) {
+        if (spec.texIndex !== pi) continue;
+        const data = readList(spec.scratchName);
+        if (!data) continue;
+        channels[spec.channel] = { name: spec.scratchName, data };
+        if (data.length > maxLen) maxLen = data.length;
+      }
+      packInfo[pi] = channels;
+    }
+    return { packInfo, maxLen };
+  }
+
+  _buildAtlasForCompiled (compiled, readList) {
+    const info = this._collectPackInfo(compiled, readList);
+    if (!info) return null;
+    return this._buildListAtlas(info.packInfo, info.maxLen);
+  }
+
+  _ensureComputeTarget (width, height) {
+    const gl = this.gl;
+    if (this._computeTexture && this._computeWidth === width && this._computeHeight === height) {
+      return;
+    }
+    if (this._computeFbo) gl.deleteFramebuffer(this._computeFbo);
+    if (this._computeTexture) gl.deleteTexture(this._computeTexture);
+    this._computeWidth = width;
+    this._computeHeight = height;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      console.error('[scaffolding-shader] Compute FBO incomplete:', status);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this._computeFbo = fbo;
+    this._computeTexture = tex;
+  }
+
+  runComputePass (compiled, width, height, readVariable, readList) {
+    const gl = this.gl;
+    if (!compiled || !compiled.fragmentSource) return null;
+    this._ensureComputeTarget(width, height);
+    const programInfo = this._compileProgram(compiled);
+    if (!programInfo) {
+      console.error('[scaffolding-shader] Compute program failed to compile');
+      return null;
+    }
+    if (this._computeProgram) gl.deleteProgram(this._computeProgram);
+    this._computeProgram = programInfo.program;
+
+    const prevFbo = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this._computeFbo);
+    gl.viewport(0, 0, width, height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(this._computeProgram);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
+    gl.enableVertexAttribArray(programInfo.locations.aPos);
+    gl.vertexAttribPointer(programInfo.locations.aPos, 2, gl.FLOAT, false, 0, 0);
+
+    gl.uniform2f(programInfo.locations.uResolution, width, height);
+    gl.uniform1f(programInfo.locations.uTime, 0);
+
+    const variableCache = readVariable ? readVariable() : this._readVariableCache();
+    for (const v of programInfo.locations.vars) {
+      const val = variableCache[v.name] !== undefined ? variableCache[v.name] : 0;
+      gl.uniform1f(v.loc, val);
+    }
+
+    const atlas = this._buildAtlasForCompiled(compiled, readList);
+    const atlasLoc = programInfo.locations.listAtlas;
+    if (atlas && atlasLoc) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, atlas.texture);
+      gl.uniform1i(atlasLoc.tex, 0);
+      gl.uniform2f(atlasLoc.size, atlas.width, atlas.height);
+      gl.uniform2f(atlasLoc.sizeInv, 1 / atlas.width, 1 / atlas.height);
+      for (let pi = 0; pi < atlas.packs.length; pi++) {
+        const pack = atlas.packs[pi];
+        const loc = atlasLoc.packs[pi];
+        if (!pack || !loc) continue;
+        gl.uniform4f(loc.llen, pack.lengths[0] || 0, pack.lengths[1] || 0, pack.lengths[2] || 0, pack.lengths[3] || 0);
+        gl.uniform3f(loc.lmeta, atlas.width, pack.height, pack.offset);
+      }
+    }
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    const pixels = new Uint8Array(width * height * 4);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, prevFbo);
+
+    // Clean up temporary atlas texture.
+    if (atlas && atlas.texture) {
+      gl.deleteTexture(atlas.texture);
+    }
+
+    this._glStateReady = false;
+
+    const out = new Float32Array(width * height);
+    for (let i = 0; i < out.length; i++) {
+      const r = pixels[i * 4];
+      const g = pixels[i * 4 + 1];
+      const b = pixels[i * 4 + 2];
+      out[i] = (r * 65536) + (g * 256) + b;
+    }
+    return out;
+  }
+
   invalidateUniformCache () {
     this._uniformCache = null;
   }
@@ -445,6 +593,18 @@ class ShaderRenderer {
     if (this._program) {
       this.gl.deleteProgram(this._program);
       this._program = null;
+    }
+    if (this._computeProgram) {
+      this.gl.deleteProgram(this._computeProgram);
+      this._computeProgram = null;
+    }
+    if (this._computeFbo) {
+      this.gl.deleteFramebuffer(this._computeFbo);
+      this._computeFbo = null;
+    }
+    if (this._computeTexture) {
+      this.gl.deleteTexture(this._computeTexture);
+      this._computeTexture = null;
     }
     if (this._buffer) {
       this.gl.deleteBuffer(this._buffer);

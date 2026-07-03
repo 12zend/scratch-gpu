@@ -37,6 +37,8 @@ export class ScratchShaderCompiler {
     this._procedures = new Map();
     this._pixel = null;
     this._pixelFnName = null;
+    this._kernel = null;
+    this._kernelMode = 'screen';
     this._varUsage = new Map();
     this._listUsage = new Map();
     this._uniformVars = [];
@@ -102,17 +104,35 @@ export class ScratchShaderCompiler {
   }
 
   compile () {
+    return this.compileKernel(null, 'screen');
+  }
+
+  compileKernel (kernel, mode = 'screen') {
+    this._kernel = kernel;
+    this._kernelMode = mode;
     this._discoverProcedures();
     if (this._procedures.size === 0) {
       return { found: false, warnings: this.warnings, errors: this.errors };
     }
-    this._pixel = this._findPixel();
-    if (!this._pixel) {
-      return { found: false, warnings: this.warnings, errors: this.errors };
-    }
-    if (this._pixel.isReporter) {
-      this.errors.push('The "pixel" block must be a command (stack) block, not a reporter.');
-      return { found: true, warnings: this.warnings, errors: this.errors };
+    if (kernel) {
+      const info = this._procedures.get(kernel.proccode);
+      if (!info) {
+        return { found: false, warnings: this.warnings, errors: this.errors };
+      }
+      this._pixel = info;
+      if (this._pixel.isReporter) {
+        this.errors.push(`The "${kernel.proccode}" block must be a command (stack) block, not a reporter.`);
+        return { found: true, warnings: this.warnings, errors: this.errors };
+      }
+    } else {
+      this._pixel = this._findPixel();
+      if (!this._pixel) {
+        return { found: false, warnings: this.warnings, errors: this.errors };
+      }
+      if (this._pixel.isReporter) {
+        this.errors.push('The "pixel" block must be a command (stack) block, not a reporter.');
+        return { found: true, warnings: this.warnings, errors: this.errors };
+      }
     }
     this._pruneUnreachable();
     const cycle = this._detectRecursion();
@@ -133,6 +153,7 @@ export class ScratchShaderCompiler {
       variableUniforms: this._uniformVars.slice(),
       listTextures: this._listTextures.slice(),
       pixelArgNames: this._pixel.paramNames.slice(),
+      kernelMode: this._kernelMode,
       warnings: this.warnings,
       errors: this.errors
     };
@@ -515,6 +536,16 @@ export class ScratchShaderCompiler {
       this._generateProcedureBody(code, info, lines);
     }
     lines.push('');
+    this._generateMain(lines);
+    if (!this._colorWritten) {
+      this.warnings.push('The "color" variable was never set inside the pixel block; the output will be black.');
+    }
+    return lines.join('\n');
+  }
+
+  _generateMain (lines) {
+    const mode = this._kernelMode;
+    const paramCount = this._pixel.paramNames.length;
     lines.push('void main() {');
     // Reset mutable (shader-written) lists to empty for this pixel.
     if (this._globalMutableArrays && this._globalMutableArrays.length) {
@@ -528,9 +559,21 @@ export class ScratchShaderCompiler {
       lines.push(`  ${v} = ${this._globalVarInitializers.get(v) || '0.0'};`);
     }
     lines.push('  sc_color = 0.0;');
-    lines.push('  float sc_px = gl_FragCoord.x - (u_resolution.x * 0.5);');
-    lines.push('  float sc_py = gl_FragCoord.y - (u_resolution.y * 0.5);');
-    lines.push(`  ${this._pixelFnName}(sc_px, sc_py);`);
+    if (mode === 'compute') {
+      if (paramCount !== 1) {
+        this.errors.push(`Compute kernel "${this._pixel.proccode}" must accept exactly one parameter (index); found ${paramCount}.`);
+      }
+      // Scratch indices are 1-based, so the first fragment (idx=0) maps to list item 1.
+      lines.push('  float sc_idx = gl_FragCoord.x + (gl_FragCoord.y * u_resolution.x) + 1.0;');
+      lines.push(`  ${this._pixelFnName}(sc_idx);`);
+    } else {
+      if (paramCount !== 2) {
+        this.errors.push(`Screen kernel "${this._pixel.proccode}" must accept exactly two parameters (x, y); found ${paramCount}.`);
+      }
+      lines.push('  float sc_px = gl_FragCoord.x - (u_resolution.x * 0.5);');
+      lines.push('  float sc_py = gl_FragCoord.y - (u_resolution.y * 0.5);');
+      lines.push(`  ${this._pixelFnName}(sc_px, sc_py);`);
+    }
     lines.push('  float c = floor(sc_color + 0.5);');
     lines.push('  c = clamp(c, 0.0, 16777215.0);');
     lines.push('  float cr = floor(c / 65536.0);');
@@ -538,10 +581,6 @@ export class ScratchShaderCompiler {
     lines.push('  float cb = mod(c, 256.0);');
     lines.push('  gl_FragColor = vec4(cr / 255.0, cg / 255.0, cb / 255.0, 1.0);');
     lines.push('}');
-    if (!this._colorWritten) {
-      this.warnings.push('The "color" variable was never set inside the pixel block; the output will be black.');
-    }
-    return lines.join('\n');
   }
 
   _stageVariableValues () {

@@ -85554,6 +85554,989 @@ class DropArea {
 
 /***/ }),
 
+/***/ "./src/gpu-kernel-detector.js":
+/*!************************************!*\
+  !*** ./src/gpu-kernel-detector.js ***!
+  \************************************/
+/*! exports provided: GpuKernelDetector, default */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "GpuKernelDetector", function() { return GpuKernelDetector; });
+function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
+function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
+function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
+function _toPropertyKey(t) { var i = _toPrimitive(t, "string"); return "symbol" == typeof i ? i : i + ""; }
+function _toPrimitive(t, r) { if ("object" != typeof t || !t) return t; var e = t[Symbol.toPrimitive]; if (void 0 !== e) { var i = e.call(t, r || "default"); if ("object" != typeof i) return i; throw new TypeError("@@toPrimitive must return a primitive value."); } return ("string" === r ? String : Number)(t); }
+const SUBSTACK_INPUTS = new Set(['SUBSTACK', 'SUBSTACK2', 'SUBSTACK3']);
+const getProcLabel = proccode => proccode.replace(/%[nsb]/g, '').trim().toLowerCase();
+const inputChild = input => {
+  if (!input) return null;
+  if (input.block !== null && input.block !== undefined) return input.block;
+  if (input.shadow !== null && input.shadow !== undefined) return input.shadow;
+  return null;
+};
+const getField = (block, name) => {
+  const f = block && block.fields && block.fields[name];
+  return f ? f.value : null;
+};
+class GpuKernelDetector {
+  constructor(runtime) {
+    this.runtime = runtime;
+    this.warnings = [];
+  }
+  detect() {
+    this.warnings = [];
+    this._injectIdCounter = 0;
+    let procedures = this._discoverProcedures();
+    const injected = this._injectLoopKernels(procedures);
+    const renderPattern = this._synthesizePixelFromRender(procedures);
+    // Re-discover so that injected/synthesized blocks are visible.
+    procedures = this._discoverProcedures();
+    const screenKernels = this._findScreenKernels(procedures);
+    const computeKernels = this._findComputeKernels(procedures);
+    const loopCandidates = this._findLoopCandidates(procedures);
+    const penCandidates = this._findPenCandidates(procedures);
+    const kernels = [];
+    for (const k of screenKernels) kernels.push(k);
+    for (const k of computeKernels) kernels.push(k);
+    return {
+      kernels,
+      injectedKernels: injected,
+      renderPattern,
+      loopCandidates,
+      penCandidates,
+      warnings: this.warnings.slice()
+    };
+  }
+  _discoverProcedures() {
+    const procedures = [];
+    const targets = this.runtime && this.runtime.targets || [];
+    for (const target of targets) {
+      const blocks = target && target.blocks;
+      if (!blocks || !blocks._blocks) continue;
+      for (const id in blocks._blocks) {
+        const b = blocks._blocks[id];
+        if (b.opcode !== 'procedures_definition') continue;
+        const proto = blocks._blocks[b.inputs && b.inputs.custom_block && b.inputs.custom_block.block];
+        if (!proto || !proto.mutation || !proto.mutation.proccode) continue;
+        const proccode = proto.mutation.proccode;
+        let paramNames = [];
+        try {
+          paramNames = JSON.parse(proto.mutation.argumentnames || '[]');
+        } catch (e) {
+          paramNames = [];
+        }
+        const bodyHead = b.next || null;
+        procedures.push({
+          blockId: id,
+          proccode,
+          paramNames,
+          bodyHead,
+          blocks,
+          target
+        });
+      }
+    }
+    return procedures;
+  }
+  _walkAll(headId, blocks, visit) {
+    let id = headId;
+    while (id) {
+      const b = blocks._blocks[id];
+      if (!b) break;
+      visit(b);
+      for (const key in b.inputs) {
+        const childId = inputChild(b.inputs[key]);
+        if (!childId) continue;
+        if (SUBSTACK_INPUTS.has(key)) {
+          this._walkAll(childId, blocks, visit);
+        } else {
+          this._walkValue(childId, blocks, visit);
+        }
+      }
+      id = b.next;
+    }
+  }
+  _walkValue(blockId, blocks, visit) {
+    const b = blocks._blocks[blockId];
+    if (!b) return;
+    visit(b);
+    for (const key in b.inputs) {
+      const childId = inputChild(b.inputs[key]);
+      if (!childId) continue;
+      if (SUBSTACK_INPUTS.has(key)) {
+        this._walkAll(childId, blocks, visit);
+      } else {
+        this._walkValue(childId, blocks, visit);
+      }
+    }
+  }
+  _hasOpcode(headId, blocks, opcode) {
+    let found = false;
+    this._walkAll(headId, blocks, b => {
+      if (b.opcode === opcode) found = true;
+    });
+    return found;
+  }
+  _writesVariable(headId, blocks, varName) {
+    let found = false;
+    const lower = String(varName).toLowerCase();
+    this._walkAll(headId, blocks, b => {
+      if ((b.opcode === 'data_setvariableto' || b.opcode === 'data_changevariableby') && String(getField(b, 'VARIABLE')).toLowerCase() === lower) {
+        found = true;
+      }
+    });
+    return found;
+  }
+  _findScreenKernels(procedures) {
+    const kernels = [];
+    for (const info of procedures) {
+      const label = getProcLabel(info.proccode);
+      // gpu_ prefixed blocks are compute kernels even if they write color.
+      if (label.startsWith('gpu_')) continue;
+      if (label === 'pixel' && info.paramNames.length === 2) {
+        kernels.push({
+          type: 'screen',
+          proccode: info.proccode,
+          paramNames: info.paramNames,
+          blockId: info.blockId,
+          target: info.target,
+          status: 'ready',
+          reason: 'Detected pixel(x,y) screen kernel'
+        });
+      } else if (label === 'pen' && info.paramNames.length === 2) {
+        kernels.push({
+          type: 'screen',
+          proccode: info.proccode,
+          paramNames: info.paramNames,
+          blockId: info.blockId,
+          target: info.target,
+          status: 'ready',
+          reason: 'Detected pen(x,y) screen kernel (treated as point-per-pixel drawing)'
+        });
+      } else if (this._writesVariable(info.bodyHead, info.blocks, 'color')) {
+        kernels.push({
+          type: 'screen',
+          proccode: info.proccode,
+          paramNames: info.paramNames,
+          blockId: info.blockId,
+          target: info.target,
+          status: info.paramNames.length === 2 ? 'ready' : 'planned',
+          reason: info.paramNames.length === 2 ? 'Writes "color" variable with 2 parameters' : 'Writes "color" variable but does not match screen kernel signature'
+        });
+      }
+    }
+    return kernels;
+  }
+  _findComputeKernels(procedures) {
+    const kernels = [];
+    for (const info of procedures) {
+      const label = getProcLabel(info.proccode);
+      if (!label.startsWith('gpu_')) continue;
+      const safe = this._isBodySafeForCompute(info.bodyHead, info.blocks, procedures);
+      if (safe.supported) {
+        kernels.push({
+          type: 'compute',
+          proccode: info.proccode,
+          paramNames: info.paramNames,
+          blockId: info.blockId,
+          target: info.target,
+          status: 'ready',
+          reason: "GPU-prefixed custom block: ".concat(info.proccode)
+        });
+      } else {
+        kernels.push({
+          type: 'compute',
+          proccode: info.proccode,
+          paramNames: info.paramNames,
+          blockId: info.blockId,
+          target: info.target,
+          status: 'unsupported',
+          reason: "GPU-prefixed but contains unsupported opcodes: ".concat(safe.reason)
+        });
+      }
+    }
+    return kernels;
+  }
+  _isBodySafeForCompute(headId, blocks, allProcedures) {
+    let visiting = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : new Set();
+    const unsupported = [];
+    const safe = new Set(['data_variable', 'data_setvariableto', 'data_changevariableby', 'data_itemoflist', 'data_lengthoflist', 'data_listcontainsitem', 'data_replaceitemoflist', 'data_addtolist', 'data_insertatlist', 'data_deleteoflist', 'data_deletealloflist', 'control_if', 'control_if_else', 'control_repeat', 'control_repeat_until', 'control_while', 'control_for_each', 'control_forever', 'control_stop', 'procedures_call', 'procedures_return', 'procedures_definition', 'argument_reporter_string_number', 'argument_reporter_boolean', 'math_number', 'math_positive_number', 'math_whole_number', 'math_integer', 'math_angle', 'text', 'operator_add', 'operator_subtract', 'operator_multiply', 'operator_divide', 'operator_mod', 'operator_round', 'operator_mathop', 'operator_random', 'operator_lt', 'operator_gt', 'operator_equals', 'operator_and', 'operator_or', 'operator_not', 'sensing_timer']);
+    this._walkAll(headId, blocks, b => {
+      const op = b.opcode;
+      if (op === 'procedures_call' && b.mutation && b.mutation.proccode) {
+        const callee = b.mutation.proccode;
+        if (visiting.has(callee)) return;
+        const calleeInfo = allProcedures.find(p => p.proccode === callee);
+        if (!calleeInfo) return;
+        visiting.add(callee);
+        const calleeSafe = this._isBodySafeForCompute(calleeInfo.bodyHead, calleeInfo.blocks, allProcedures, visiting);
+        visiting.delete(callee);
+        if (!calleeSafe.supported) {
+          unsupported.push("call to ".concat(callee, ": ").concat(calleeSafe.reason));
+        }
+        return;
+      }
+      if (!safe.has(op)) {
+        unsupported.push(op);
+      }
+    });
+    if (unsupported.length) {
+      return {
+        supported: false,
+        reason: [...new Set(unsupported)].slice(0, 5).join(', ')
+      };
+    }
+    return {
+      supported: true,
+      reason: ''
+    };
+  }
+  _findLoopCandidates(procedures) {
+    const candidates = [];
+    for (const info of procedures) {
+      this._walkAll(info.bodyHead, info.blocks, b => {
+        if (!b.opcode.startsWith('control_repeat') && b.opcode !== 'control_forever' && b.opcode !== 'control_for_each') return;
+        const bodyId = inputChild(b.inputs && b.inputs.SUBSTACK);
+        if (!bodyId) return;
+        const safe = this._isBodySafeForCompute(bodyId, info.blocks, procedures);
+        if (safe.supported) {
+          candidates.push({
+            location: "".concat(info.proccode),
+            opcode: b.opcode,
+            reason: 'Body uses only arithmetic/list ops; could be unrolled/parallelized on GPU'
+          });
+        }
+      });
+    }
+    return candidates;
+  }
+  _findPenCandidates(procedures) {
+    const candidates = [];
+    for (const info of procedures) {
+      let hasPen = false;
+      this._walkAll(info.bodyHead, info.blocks, b => {
+        if (b.opcode && b.opcode.startsWith('pen_')) hasPen = true;
+      });
+      if (hasPen) {
+        candidates.push({
+          proccode: info.proccode,
+          reason: 'Contains pen blocks; line/point rasterization could be GPUized'
+        });
+      }
+    }
+    return candidates;
+  }
+  _synthesizePixelFromRender(procedures) {
+    const existingProccodes = new Set(procedures.map(p => p.proccode));
+    if (existingProccodes.has('pixel %s %s')) return null;
+    for (const info of procedures) {
+      let pattern = this._findRenderPattern(info.bodyHead, info.blocks);
+      if (!pattern) {
+        pattern = this._findBufferPattern(info.bodyHead, info.blocks);
+      }
+      if (!pattern) continue;
+      const {
+        helperProccode,
+        colorExprId
+      } = pattern;
+      try {
+        const blocks = this._buildPixelBlocks(helperProccode, colorExprId, info.blocks);
+        Object.assign(info.blocks._blocks, blocks);
+        return {
+          helperProccode,
+          renderProccode: info.proccode,
+          reason: pattern.reason || "Synthesized pixel(x,y) from render routine calling ".concat(helperProccode)
+        };
+      } catch (e) {
+        this.warnings.push("Failed to synthesize pixel from ".concat(info.proccode, ": ").concat(e && e.message));
+      }
+    }
+    return null;
+  }
+  _findRenderPattern(headId, blocks) {
+    let helperProccode = null;
+    let colorExprId = null;
+    let hasDown = false;
+    let hasUp = false;
+
+    // Look for an inner loop body that calls a 2-arg helper with motion x/y,
+    // then sets pen color and does penDown/penUp.
+    this._walkAll(headId, blocks, b => {
+      if (b.opcode !== 'control_repeat' && b.opcode !== 'control_forever') return;
+      const outerBodyId = inputChild(b.inputs && b.inputs.SUBSTACK);
+      if (!outerBodyId) return;
+      this._walkAll(outerBodyId, blocks, innerB => {
+        if (innerB.opcode !== 'control_repeat' && innerB.opcode !== 'control_forever') return;
+        const innerBodyId = inputChild(innerB.inputs && innerB.inputs.SUBSTACK);
+        if (!innerBodyId) return;
+        let localHelper = null;
+        let localColor = null;
+        let localDown = false;
+        let localUp = false;
+        this._walkAll(innerBodyId, blocks, stmt => {
+          if (stmt.opcode === 'procedures_call' && stmt.mutation && stmt.mutation.proccode) {
+            const args = this._callArgs(stmt, blocks);
+            if (args.length === 2 && this._isMotionPosition(args[0], 'x') && this._isMotionPosition(args[1], 'y')) {
+              localHelper = stmt.mutation.proccode;
+            }
+          }
+          if (stmt.opcode === 'pen_setPenColorToColor') {
+            localColor = inputChild(stmt.inputs && stmt.inputs.COLOR);
+          }
+          if (stmt.opcode === 'pen_penDown') localDown = true;
+          if (stmt.opcode === 'pen_penUp') localUp = true;
+        });
+        if (localHelper && localColor && localDown && localUp) {
+          helperProccode = localHelper;
+          colorExprId = localColor;
+          hasDown = true;
+          hasUp = true;
+        }
+      });
+    });
+    if (!helperProccode || !colorExprId) return null;
+    return {
+      helperProccode,
+      colorExprId
+    };
+  }
+  _findBufferPattern(headId, blocks) {
+    // Detect patterns like BIGBOX [3D]3:
+    //   for y:
+    //     for x:
+    //       call helper(x, y)
+    //       replace item N of buff with packed-color
+    //   ...later...
+    //   for y:
+    //     for x:
+    //       set pen color to item N of buff
+    //       penDown / penUp
+    // When found, fuse the helper + packed-color into a single pixel(x,y).
+    const fills = [];
+    const draws = [];
+    for (const {
+      innerBodyId
+    } of this._findDoubleLoops(headId, blocks)) {
+      const stmts = this._iterStatements(innerBodyId, blocks);
+      let helperProccode = null;
+      let helperArgVars = [];
+      let colorExprId = null;
+      let listName = null;
+      let drawList = null;
+      let hasDown = false;
+      let hasUp = false;
+      for (const stmtId of stmts) {
+        const b = blocks._blocks[stmtId];
+        if (!b) continue;
+        if (b.opcode === 'procedures_call' && b.mutation && b.mutation.proccode) {
+          const args = this._callArgs(b, blocks);
+          if (args.length === 2 && args.every(a => a && a.opcode === 'data_variable')) {
+            helperProccode = b.mutation.proccode;
+            helperArgVars = args.map(a => getField(a, 'VARIABLE'));
+          }
+        }
+        if (b.opcode === 'data_replaceitemoflist') {
+          listName = getField(b, 'LIST');
+          colorExprId = inputChild(b.inputs && b.inputs.ITEM);
+        }
+        if (b.opcode === 'pen_setPenColorToColor') {
+          const colorId = inputChild(b.inputs && b.inputs.COLOR);
+          const colorBlock = colorId ? blocks._blocks[colorId] : null;
+          if (colorBlock && colorBlock.opcode === 'data_itemoflist') {
+            drawList = getField(colorBlock, 'LIST');
+          }
+        }
+        if (b.opcode === 'pen_penDown') hasDown = true;
+        if (b.opcode === 'pen_penUp') hasUp = true;
+      }
+      if (helperProccode && colorExprId && listName) {
+        fills.push({
+          helperProccode,
+          colorExprId,
+          listName,
+          helperArgVars
+        });
+      }
+      if (drawList && hasDown && hasUp) {
+        draws.push(drawList);
+      }
+    }
+    for (const f of fills) {
+      if (draws.includes(f.listName)) {
+        return {
+          helperProccode: f.helperProccode,
+          colorExprId: f.colorExprId,
+          reason: "Synthesized pixel(x,y) from buffer fill/draw loops using ".concat(f.helperProccode)
+        };
+      }
+    }
+    return null;
+  }
+  _findDoubleLoops(headId, blocks) {
+    const found = [];
+    this._walkAll(headId, blocks, b => {
+      if (b.opcode !== 'control_repeat' && b.opcode !== 'control_forever') return;
+      const outerBodyId = inputChild(b.inputs && b.inputs.SUBSTACK);
+      if (!outerBodyId) return;
+      this._walkAll(outerBodyId, blocks, innerB => {
+        if (innerB.opcode !== 'control_repeat' && innerB.opcode !== 'control_forever') return;
+        const innerBodyId = inputChild(innerB.inputs && innerB.inputs.SUBSTACK);
+        if (!innerBodyId) return;
+        found.push({
+          outerLoopId: b,
+          innerLoopId: innerB,
+          innerBodyId
+        });
+      });
+    });
+    return found;
+  }
+  _iterStatements(headId, blocks) {
+    const ids = [];
+    let id = headId;
+    while (id) {
+      const b = blocks._blocks[id];
+      if (!b) break;
+      ids.push(id);
+      id = b.next || null;
+    }
+    return ids;
+  }
+  _callArgs(callBlock, blocks) {
+    const args = [];
+    const argIds = [];
+    try {
+      argIds.push(...JSON.parse(callBlock.mutation.argumentids || '[]'));
+    } catch (e) {}
+    for (const id of argIds) {
+      const child = inputChild(callBlock.inputs && callBlock.inputs[id]);
+      args.push(child ? blocks._blocks[child] : null);
+    }
+    return args;
+  }
+  _isMotionPosition(block, axis) {
+    if (!block) return false;
+    return block.opcode === (axis === 'x' ? 'motion_xposition' : 'motion_yposition');
+  }
+  _buildPixelBlocks(helperProccode, colorExprId, blocks) {
+    var _helperProto$mutation2, _helperProto$mutation3;
+    const newBlocks = {};
+
+    // call helper(x, y)
+    const helperProto = this._findProcedurePrototype(helperProccode, blocks);
+    let argIds = [];
+    try {
+      var _helperProto$mutation;
+      argIds = JSON.parse((helperProto === null || helperProto === void 0 || (_helperProto$mutation = helperProto.mutation) === null || _helperProto$mutation === void 0 ? void 0 : _helperProto$mutation.argumentids) || '[]');
+    } catch (e) {
+      argIds = [];
+    }
+    const callInputs = {};
+    for (let i = 0; i < argIds.length; i++) {
+      const argName = i === 0 ? 'x' : i === 1 ? 'y' : "arg".concat(i);
+      const argId = this._newId('sc_gpu_arg_');
+      newBlocks[argId] = {
+        opcode: 'argument_reporter_string_number',
+        fields: {
+          VALUE: {
+            value: argName,
+            name: 'VALUE'
+          }
+        },
+        inputs: {},
+        next: null,
+        parent: null,
+        shadow: false,
+        topLevel: false
+      };
+      callInputs[argIds[i]] = {
+        block: argId
+      };
+    }
+    const callId = this._newId('sc_gpu_call_');
+    newBlocks[callId] = {
+      opcode: 'procedures_call',
+      fields: {},
+      inputs: callInputs,
+      mutation: {
+        proccode: helperProccode,
+        argumentids: (helperProto === null || helperProto === void 0 || (_helperProto$mutation2 = helperProto.mutation) === null || _helperProto$mutation2 === void 0 ? void 0 : _helperProto$mutation2.argumentids) || '[]',
+        argumentnames: (helperProto === null || helperProto === void 0 || (_helperProto$mutation3 = helperProto.mutation) === null || _helperProto$mutation3 === void 0 ? void 0 : _helperProto$mutation3.argumentnames) || '[]'
+      },
+      next: null,
+      parent: null,
+      shadow: false,
+      topLevel: false
+    };
+
+    // set color to cloned color expression
+    const newColorExprId = this._cloneExprForPixel(colorExprId, blocks, newBlocks);
+    const setColorId = this._newId('sc_gpu_setcolor_');
+    newBlocks[setColorId] = {
+      opcode: 'data_setvariableto',
+      fields: {
+        VARIABLE: {
+          value: 'color',
+          name: 'VARIABLE'
+        }
+      },
+      inputs: {
+        VALUE: {
+          block: newColorExprId
+        }
+      },
+      next: null,
+      parent: null,
+      shadow: false,
+      topLevel: false
+    };
+
+    // pixel(x, y) prototype & definition
+    const protoId = this._newId('sc_gpu_proto_');
+    newBlocks[protoId] = {
+      opcode: 'procedures_prototype',
+      fields: {},
+      inputs: {},
+      mutation: {
+        proccode: 'pixel %s %s',
+        argumentnames: '["x","y"]',
+        argumentids: '["x","y"]',
+        argumentdefaults: '["",""]',
+        warp: 'false'
+      },
+      next: null,
+      parent: null,
+      shadow: true,
+      topLevel: false
+    };
+    const defId = this._newId('sc_gpu_def_');
+    newBlocks[defId] = {
+      opcode: 'procedures_definition',
+      fields: {},
+      inputs: {
+        custom_block: {
+          block: protoId,
+          shadow: true
+        }
+      },
+      mutation: {},
+      next: callId,
+      parent: null,
+      shadow: false,
+      topLevel: true,
+      x: 0,
+      y: 0
+    };
+
+    // chain call -> set color
+    newBlocks[callId].next = setColorId;
+    return newBlocks;
+  }
+  _findProcedurePrototype(proccode, blocks) {
+    for (const id in blocks._blocks) {
+      const b = blocks._blocks[id];
+      if (b.opcode === 'procedures_definition') {
+        var _b$inputs;
+        const proto = blocks._blocks[(_b$inputs = b.inputs) === null || _b$inputs === void 0 || (_b$inputs = _b$inputs.custom_block) === null || _b$inputs === void 0 ? void 0 : _b$inputs.block];
+        if (proto && proto.mutation && proto.mutation.proccode === proccode) {
+          return proto;
+        }
+      }
+    }
+    return null;
+  }
+  _cloneExprForPixel(blockId, blocks, newBlocks) {
+    if (!blockId) return null;
+    const b = blocks._blocks[blockId];
+    if (!b) return null;
+    if (b.opcode === 'motion_xposition') {
+      const id = this._newId('sc_gpu_arg_');
+      newBlocks[id] = {
+        opcode: 'argument_reporter_string_number',
+        fields: {
+          VALUE: {
+            value: 'x',
+            name: 'VALUE'
+          }
+        },
+        inputs: {},
+        next: null,
+        parent: null,
+        shadow: false,
+        topLevel: false
+      };
+      return id;
+    }
+    if (b.opcode === 'motion_yposition') {
+      const id = this._newId('sc_gpu_arg_');
+      newBlocks[id] = {
+        opcode: 'argument_reporter_string_number',
+        fields: {
+          VALUE: {
+            value: 'y',
+            name: 'VALUE'
+          }
+        },
+        inputs: {},
+        next: null,
+        parent: null,
+        shadow: false,
+        topLevel: false
+      };
+      return id;
+    }
+    const newId = this._newId('sc_gpu_expr_');
+    const newInputs = {};
+    for (const key in b.inputs) {
+      const inp = b.inputs[key];
+      const child = inputChild(inp);
+      const clonedChild = child ? this._cloneExprForPixel(child, blocks, newBlocks) : null;
+      const shadow = inp.shadow && inp.shadow !== child ? this._cloneExprForPixel(inp.shadow, blocks, newBlocks) : clonedChild;
+      newInputs[key] = {
+        name: inp.name || key,
+        block: clonedChild,
+        shadow
+      };
+    }
+    const newFields = {};
+    for (const key in b.fields) {
+      newFields[key] = _objectSpread({}, b.fields[key]);
+    }
+    newBlocks[newId] = {
+      opcode: b.opcode,
+      fields: newFields,
+      inputs: newInputs,
+      mutation: b.mutation ? _objectSpread({}, b.mutation) : {},
+      next: null,
+      parent: null,
+      shadow: !!b.shadow,
+      topLevel: false
+    };
+    return newId;
+  }
+  _injectLoopKernels(procedures) {
+    const injected = [];
+    const existingProccodes = new Set(procedures.map(p => p.proccode));
+    for (const info of procedures) {
+      this._walkAll(info.bodyHead, info.blocks, b => {
+        if (b.opcode !== 'control_for_each') return;
+        const varName = getField(b, 'VARIABLE');
+        const bodyId = inputChild(b.inputs && b.inputs.SUBSTACK);
+        if (!varName || !bodyId) return;
+        const bodyHead = info.blocks._blocks[bodyId];
+        if (!bodyHead || bodyHead.opcode !== 'data_replaceitemoflist') return;
+        if (bodyHead.next) return; // only single-statement bodies for now
+
+        const indexId = inputChild(bodyHead.inputs && bodyHead.inputs.INDEX);
+        if (!indexId) return;
+        const indexBlock = info.blocks._blocks[indexId];
+        if (!indexBlock || indexBlock.opcode !== 'data_variable' || getField(indexBlock, 'VARIABLE') !== varName) return;
+        const listName = getField(bodyHead, 'LIST');
+        const exprId = inputChild(bodyHead.inputs && bodyHead.inputs.ITEM);
+        if (!listName || !exprId) return;
+        const safe = this._isBodySafeForCompute(bodyId, info.blocks, procedures);
+        if (!safe.supported) return;
+        const proccode = "gpu_".concat(listName);
+        if (existingProccodes.has(proccode)) {
+          this.warnings.push("Cannot auto-GPUize loop for list \"".concat(listName, "\": a block named \"").concat(proccode, "\" already exists."));
+          return;
+        }
+        existingProccodes.add(proccode);
+        try {
+          const blocks = this._buildLoopKernelBlocks(proccode, exprId, info.blocks, varName);
+          Object.assign(info.blocks._blocks, blocks);
+          injected.push({
+            proccode,
+            listName,
+            source: info.proccode
+          });
+        } catch (e) {
+          this.warnings.push("Failed to auto-GPUize loop for list \"".concat(listName, "\": ").concat(e && e.message));
+        }
+      });
+    }
+    return injected;
+  }
+  _sanitizeForProccode(name) {
+    return String(name).trim().replace(/[^a-zA-Z0-9_]/g, '_').replace(/_+/g, '_');
+  }
+  _buildLoopKernelBlocks(proccode, exprId, blocks, loopVarName) {
+    const newBlocks = {};
+    const newExprId = this._cloneExpr(exprId, blocks, newBlocks, loopVarName);
+    const setColorId = this._newId('sc_gpu_setcolor_');
+    newBlocks[setColorId] = {
+      opcode: 'data_setvariableto',
+      fields: {
+        VARIABLE: {
+          value: 'color',
+          name: 'VARIABLE'
+        }
+      },
+      inputs: {
+        VALUE: {
+          block: newExprId
+        }
+      },
+      next: null,
+      parent: null,
+      shadow: false,
+      topLevel: false
+    };
+    const protoId = this._newId('sc_gpu_proto_');
+    newBlocks[protoId] = {
+      opcode: 'procedures_prototype',
+      fields: {},
+      inputs: {},
+      mutation: {
+        proccode: "".concat(proccode, " %s"),
+        argumentnames: '["i"]',
+        argumentids: '["i"]',
+        argumentdefaults: '[""]',
+        warp: 'false'
+      },
+      next: null,
+      parent: null,
+      shadow: true,
+      topLevel: false
+    };
+    const defId = this._newId('sc_gpu_def_');
+    newBlocks[defId] = {
+      opcode: 'procedures_definition',
+      fields: {},
+      inputs: {
+        custom_block: {
+          block: protoId,
+          shadow: true
+        }
+      },
+      mutation: {},
+      next: setColorId,
+      parent: null,
+      shadow: false,
+      topLevel: true,
+      x: 0,
+      y: 0
+    };
+    return newBlocks;
+  }
+  _cloneExpr(blockId, blocks, newBlocks, loopVarName) {
+    if (!blockId) return null;
+    const b = blocks._blocks[blockId];
+    if (!b) return null;
+
+    // Replace references to the loop variable with the kernel argument 'i'.
+    if (b.opcode === 'data_variable' && getField(b, 'VARIABLE') === loopVarName) {
+      const id = this._newId('sc_gpu_arg_');
+      newBlocks[id] = {
+        opcode: 'argument_reporter_string_number',
+        fields: {
+          VALUE: {
+            value: 'i',
+            name: 'VALUE'
+          }
+        },
+        inputs: {},
+        next: null,
+        parent: null,
+        shadow: false,
+        topLevel: false
+      };
+      return id;
+    }
+    const newId = this._newId('sc_gpu_expr_');
+    const newInputs = {};
+    for (const key in b.inputs) {
+      const inp = b.inputs[key];
+      const child = inputChild(inp);
+      const clonedChild = child ? this._cloneExpr(child, blocks, newBlocks, loopVarName) : null;
+      const shadow = inp.shadow && inp.shadow !== child ? this._cloneExpr(inp.shadow, blocks, newBlocks, loopVarName) : clonedChild;
+      newInputs[key] = {
+        name: inp.name || key,
+        block: clonedChild,
+        shadow
+      };
+    }
+    const newFields = {};
+    for (const key in b.fields) {
+      newFields[key] = _objectSpread({}, b.fields[key]);
+    }
+    newBlocks[newId] = {
+      opcode: b.opcode,
+      fields: newFields,
+      inputs: newInputs,
+      mutation: b.mutation ? _objectSpread({}, b.mutation) : {},
+      next: null,
+      parent: null,
+      shadow: !!b.shadow,
+      topLevel: false
+    };
+    return newId;
+  }
+  _newId(prefix) {
+    return "".concat(prefix).concat(this._injectIdCounter++);
+  }
+}
+/* harmony default export */ __webpack_exports__["default"] = (GpuKernelDetector);
+
+/***/ }),
+
+/***/ "./src/gpu-kernel-scheduler.js":
+/*!*************************************!*\
+  !*** ./src/gpu-kernel-scheduler.js ***!
+  \*************************************/
+/*! exports provided: GpuKernelScheduler, default */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "GpuKernelScheduler", function() { return GpuKernelScheduler; });
+/* harmony import */ var _shader_compiler_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./shader-compiler.js */ "./src/shader-compiler.js");
+/* harmony import */ var _gpu_kernel_detector_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./gpu-kernel-detector.js */ "./src/gpu-kernel-detector.js");
+
+
+const MAX_TEX_SIZE = 2048;
+const getProcLabel = proccode => proccode.replace(/%[nsb]/g, '').trim().toLowerCase();
+const generateId = () => 'gpu_' + Math.random().toString(36).slice(2) + '_' + Date.now();
+class GpuKernelScheduler {
+  constructor(scaffolding, shaderRenderer) {
+    this.scaffolding = scaffolding;
+    this.shaderRenderer = shaderRenderer;
+    this.kernels = [];
+    this.diagnostics = {
+      detected: [],
+      loopCandidates: [],
+      penCandidates: [],
+      warnings: []
+    };
+    this.running = false;
+    this._rafId = null;
+  }
+  detectAndCompile() {
+    this.kernels = [];
+    this.diagnostics = {
+      detected: [],
+      loopCandidates: [],
+      penCandidates: [],
+      warnings: []
+    };
+    const runtime = this.scaffolding.vm && this.scaffolding.vm.runtime;
+    if (!runtime) return this.diagnostics;
+    const detector = new _gpu_kernel_detector_js__WEBPACK_IMPORTED_MODULE_1__["default"](runtime);
+    const detection = detector.detect();
+    this.diagnostics.detected = detection.kernels.map(k => ({
+      proccode: k.proccode,
+      type: k.type,
+      status: k.status,
+      reason: k.reason
+    }));
+    this.diagnostics.loopCandidates = detection.loopCandidates;
+    this.diagnostics.penCandidates = detection.penCandidates;
+    this.diagnostics.warnings = detection.warnings;
+    for (const k of detection.kernels) {
+      if (k.type !== 'compute' || k.status !== 'ready') continue;
+      const compiler = new _shader_compiler_js__WEBPACK_IMPORTED_MODULE_0__["default"](runtime);
+      const result = compiler.compileKernel(k, 'compute');
+      if (!result.found || result.errors.length) {
+        this.diagnostics.warnings.push("Compute kernel \"".concat(k.proccode, "\" failed to compile: ").concat(result.errors.join('; ')));
+        continue;
+      }
+      const outputListName = this._outputListName(k.proccode);
+      this.kernels.push({
+        kernel: k,
+        compiled: result,
+        outputListName,
+        label: getProcLabel(k.proccode)
+      });
+    }
+    return this.diagnostics;
+  }
+  _outputListName(proccode) {
+    const label = proccode.replace(/%[nsb]/g, '').trim();
+    const lower = label.toLowerCase();
+    if (lower.startsWith('gpu_')) {
+      return label.slice(4);
+    }
+    return label;
+  }
+  _computeTargetSize(length) {
+    const maxArea = MAX_TEX_SIZE * MAX_TEX_SIZE;
+    const len = Math.min(length, maxArea);
+    const w = Math.min(MAX_TEX_SIZE, Math.ceil(Math.sqrt(len)));
+    const h = Math.min(MAX_TEX_SIZE, Math.ceil(len / w));
+    return {
+      width: w,
+      height: h,
+      capped: length > maxArea
+    };
+  }
+  start() {
+    if (this.running) return;
+    this.running = true;
+    this._tick();
+  }
+  stop() {
+    this.running = false;
+    if (this._rafId !== null) {
+      cancelAnimationFrame(this._rafId);
+      this._rafId = null;
+    }
+  }
+  _tick() {
+    this._rafId = requestAnimationFrame(() => {
+      if (!this.running) return;
+      this._runKernels();
+      if (this.running) this._tick();
+    });
+  }
+  _runKernels() {
+    if (!this.shaderRenderer || !this.kernels.length) return;
+    for (const entry of this.kernels) {
+      this._runKernel(entry);
+    }
+  }
+  _runKernel(entry) {
+    const list = this._lookupOrCreateList(entry.outputListName);
+    if (!list) return;
+    const length = Array.isArray(list.value) ? list.value.length : 0;
+    if (length === 0) return;
+    const {
+      width,
+      height,
+      capped
+    } = this._computeTargetSize(length);
+    if (capped) {
+      console.warn("[gpu-kernel-scheduler] List \"".concat(entry.outputListName, "\" is too large; only first ").concat(MAX_TEX_SIZE * MAX_TEX_SIZE, " elements will be updated."));
+    }
+    const result = this.shaderRenderer.runComputePass(entry.compiled, width, height, () => this.scaffolding._buildVariableCache(), name => this.scaffolding._readShaderList(name));
+    if (!result) return;
+    const out = new Array(length);
+    for (let i = 0; i < length; i++) {
+      out[i] = result[i];
+    }
+    list.value = out;
+  }
+  _lookupOrCreateList(name) {
+    const stage = this.scaffolding.vm.runtime.getTargetForStage();
+    if (!stage) return null;
+    let variable = stage.lookupVariableByNameAndType(name, 'list');
+    if (!variable) {
+      try {
+        variable = stage.createVariable(generateId(), 'list', name, false);
+      } catch (e) {
+        console.warn('[gpu-kernel-scheduler] Could not create list:', name, e);
+        return null;
+      }
+    }
+    return variable;
+  }
+}
+/* harmony default export */ __webpack_exports__["default"] = (GpuKernelScheduler);
+
+/***/ }),
+
 /***/ "./src/index.js":
 /*!**********************!*\
   !*** ./src/index.js ***!
@@ -86325,6 +87308,10 @@ __webpack_require__.r(__webpack_exports__);
 var _messages_json__WEBPACK_IMPORTED_MODULE_6___namespace = /*#__PURE__*/__webpack_require__.t(/*! ./messages.json */ "./src/messages.json", 1);
 /* harmony import */ var _shader_compiler_js__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! ./shader-compiler.js */ "./src/shader-compiler.js");
 /* harmony import */ var _shader_renderer_js__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! ./shader-renderer.js */ "./src/shader-renderer.js");
+/* harmony import */ var _gpu_kernel_detector_js__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(/*! ./gpu-kernel-detector.js */ "./src/gpu-kernel-detector.js");
+/* harmony import */ var _gpu_kernel_scheduler_js__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(/*! ./gpu-kernel-scheduler.js */ "./src/gpu-kernel-scheduler.js");
+
+
 
 
 
@@ -86401,6 +87388,7 @@ class Scaffolding extends EventTarget {
     this.shaderOnTop = true;
     this.shaderEnabled = false;
     this.shaderDiagnostics = null;
+    this._kernelScheduler = null;
     this._monitors = new Map();
     this._mousedownPosition = null;
     this._draggingId = null;
@@ -86489,7 +87477,34 @@ class Scaffolding extends EventTarget {
     overlay.style.display = 'block';
     const lines = [];
     if (!diag.found) {
-      lines.push('No "pixel" custom block found in this project.');
+      lines.push('No screen kernel (e.g. "pixel(x,y)") found in this project.');
+    }
+    const kernels = diag.kernels || [];
+    if (kernels.length) {
+      lines.push('GPU kernels:');
+      for (const k of kernels) {
+        lines.push("  \u2022 [".concat(k.type, "] ").concat(k.proccode, " (").concat(k.status, ")"));
+      }
+    }
+    const loopCandidates = diag.loopCandidates || [];
+    if (loopCandidates.length) {
+      lines.push("Parallelizable loops found: ".concat(loopCandidates.length));
+      for (const c of loopCandidates.slice(0, 5)) {
+        lines.push("  \u2022 ".concat(c.opcode, " in ").concat(c.location));
+      }
+      if (loopCandidates.length > 5) {
+        lines.push("  \u2026and ".concat(loopCandidates.length - 5, " more"));
+      }
+    }
+    const penCandidates = diag.penCandidates || [];
+    if (penCandidates.length) {
+      lines.push("Pen routines found: ".concat(penCandidates.length));
+      for (const c of penCandidates.slice(0, 5)) {
+        lines.push("  \u2022 ".concat(c.proccode));
+      }
+      if (penCandidates.length > 5) {
+        lines.push("  \u2026and ".concat(penCandidates.length - 5, " more"));
+      }
     }
     if (errors) {
       lines.push('Errors:');
@@ -86532,55 +87547,96 @@ class Scaffolding extends EventTarget {
     if (!this._shaderRenderer) return;
     this._shaderRenderer.stop();
     if (this._shaderRenderer.clearGlErrors) this._shaderRenderer.clearGlErrors();
-    const compiler = new _shader_compiler_js__WEBPACK_IMPORTED_MODULE_7__["default"](this.vm.runtime);
-    let result;
-    try {
-      result = compiler.compile();
-    } catch (e) {
-      console.error('[scaffolding-shader] Compiler crashed:', e);
-      this.shaderDiagnostics = {
-        found: false,
-        warnings: [],
-        errors: [String(e && e.message || e)]
-      };
-      this._shaderCanvas.style.display = 'none';
-      this.shaderEnabled = false;
-      this._updateShaderStatus();
-      return;
+    if (this._kernelScheduler) {
+      this._kernelScheduler.stop();
+      this._kernelScheduler = null;
     }
-    this.shaderDiagnostics = {
-      found: result.found,
-      warnings: result.warnings,
-      errors: result.errors
+    this._restoreProceduresOnCPU();
+    const runtime = this.vm && this.vm.runtime;
+    if (!runtime) return;
+    const detector = new _gpu_kernel_detector_js__WEBPACK_IMPORTED_MODULE_9__["default"](runtime);
+    const detection = detector.detect();
+    const screenKernel = detection.kernels.find(k => k.type === 'screen' && k.status === 'ready');
+    const diagnostics = {
+      found: false,
+      warnings: detection.warnings.slice(),
+      errors: [],
+      kernels: detection.kernels,
+      loopCandidates: detection.loopCandidates,
+      penCandidates: detection.penCandidates
     };
-    if (result.warnings.length) {
-      console.warn('[scaffolding-shader] Warnings:\n  ' + result.warnings.join('\n  '));
-    }
-    if (!result.found || result.errors.length) {
-      this._shaderCanvas.style.display = 'none';
-      this.shaderEnabled = false;
-      if (result.errors.length) {
-        console.error('[scaffolding-shader] Errors:\n  ' + result.errors.join('\n  '));
+    let screenCompiled = null;
+    let screenCompiler = null;
+    if (screenKernel) {
+      screenCompiler = new _shader_compiler_js__WEBPACK_IMPORTED_MODULE_7__["default"](runtime);
+      try {
+        screenCompiled = screenCompiler.compileKernel(screenKernel, 'screen');
+      } catch (e) {
+        diagnostics.errors.push(String(e && e.message || e));
       }
-      this._updateShaderStatus();
-      return;
+      if (screenCompiled) {
+        diagnostics.found = screenCompiled.found;
+        diagnostics.warnings.push(...screenCompiled.warnings);
+        diagnostics.errors.push(...screenCompiled.errors);
+      }
     }
-    const ok = this._shaderRenderer.setProgram(result, name => this._readShaderVariable(name));
-    if (!ok) {
+    if (diagnostics.warnings.length) {
+      console.warn('[scaffolding-shader] Warnings:\n  ' + diagnostics.warnings.join('\n  '));
+    }
+    if (screenCompiled && screenCompiled.errors.length) {
+      this.shaderDiagnostics = diagnostics;
       this._shaderCanvas.style.display = 'none';
       this.shaderEnabled = false;
-      this.shaderDiagnostics.errors = (this.shaderDiagnostics.errors || []).concat(['GPU program failed to compile (see console).']);
+      console.error('[scaffolding-shader] Errors:\n  ' + diagnostics.errors.join('\n  '));
       this._updateShaderStatus();
       return;
     }
-    this._shaderRenderer.setVariableCacheProvider(() => this._buildVariableCache());
-    this._shaderRenderer.setListReader(name => this._readShaderListCached(name));
-    this._shaderRenderer.uploadListData();
-    this._shaderRenderer.resize(this.width * this.shaderScale, this.height * this.shaderScale);
-    this._shaderCanvas.style.display = 'block';
-    this._shaderRenderer.resetTime();
-    this._shaderRenderer.start();
-    this._skipPixelOnCPU(compiler);
+    let screenEnabled = false;
+    if (screenCompiled && screenCompiled.found) {
+      const ok = this._shaderRenderer.setProgram(screenCompiled, name => this._readShaderVariable(name));
+      if (!ok) {
+        diagnostics.errors.push('GPU program failed to compile (see console).');
+        this.shaderDiagnostics = diagnostics;
+        this._shaderCanvas.style.display = 'none';
+        this.shaderEnabled = false;
+        this._updateShaderStatus();
+        return;
+      }
+      this._shaderRenderer.setVariableCacheProvider(() => this._buildVariableCache());
+      this._shaderRenderer.setListReader(name => this._readShaderListCached(name));
+      this._shaderRenderer.uploadListData();
+      this._shaderRenderer.resize(this.width * this.shaderScale, this.height * this.shaderScale);
+      this._shaderCanvas.style.display = 'block';
+      this._shaderRenderer.resetTime();
+      this._shaderRenderer.start();
+      screenEnabled = true;
+    } else {
+      this._shaderCanvas.style.display = 'none';
+    }
+    this._kernelScheduler = new _gpu_kernel_scheduler_js__WEBPACK_IMPORTED_MODULE_10__["GpuKernelScheduler"](this, this._shaderRenderer);
+    const schedulerDiagnostics = this._kernelScheduler.detectAndCompile();
+    diagnostics.kernels = schedulerDiagnostics.detected;
+    diagnostics.loopCandidates = schedulerDiagnostics.loopCandidates;
+    diagnostics.penCandidates = schedulerDiagnostics.penCandidates;
+    diagnostics.warnings.push(...schedulerDiagnostics.warnings);
+    if (this._kernelScheduler.kernels.length > 0) {
+      this._kernelScheduler.start();
+    }
+    const computeEnabled = this._kernelScheduler.kernels.length > 0;
+    if (!screenEnabled && !computeEnabled) {
+      this.shaderDiagnostics = diagnostics;
+      this.shaderEnabled = false;
+      this._updateShaderStatus();
+      return;
+    }
+    const proccodesToSkip = [];
+    if (screenEnabled && screenKernel) proccodesToSkip.push(screenKernel.proccode);
+    if (detection.renderPattern) proccodesToSkip.push(detection.renderPattern.renderProccode);
+    for (const entry of this._kernelScheduler.kernels) {
+      proccodesToSkip.push(entry.kernel.proccode);
+    }
+    this._skipProceduresOnCPU(proccodesToSkip);
+    this.shaderDiagnostics = diagnostics;
     this.shaderEnabled = true;
     this._updateShaderStatus();
   }
@@ -86643,16 +87699,21 @@ class Scaffolding extends EventTarget {
   }
   disableShader() {
     if (this._shaderRenderer) this._shaderRenderer.stop();
+    if (this._kernelScheduler) {
+      this._kernelScheduler.stop();
+      this._kernelScheduler = null;
+    }
     if (this._shaderCanvas) this._shaderCanvas.style.display = 'none';
-    this._restorePixelOnCPU();
+    this._restoreProceduresOnCPU();
     this.shaderEnabled = false;
     this._updateShaderStatus();
   }
-  _skipPixelOnCPU(compiler) {
-    this._restorePixelOnCPU();
-    const pixel = compiler._pixel;
-    if (!pixel || !pixel.proccode) return;
+  _skipProceduresOnCPU(proccodes) {
+    this._restoreProceduresOnCPU();
+    if (!proccodes || !proccodes.length) return;
+    const set = new Set(proccodes);
     const targets = this.vm && this.vm.runtime && this.vm.runtime.targets || [];
+    this._procedureBackups = [];
     for (const target of targets) {
       if (!target || !target.blocks || !target.blocks._blocks) continue;
       for (const id in target.blocks._blocks) {
@@ -86660,27 +87721,23 @@ class Scaffolding extends EventTarget {
         if (b.opcode !== 'procedures_definition') continue;
         const protoId = b.inputs && b.inputs.custom_block && b.inputs.custom_block.block;
         const proto = protoId && target.blocks._blocks[protoId];
-        if (!proto || !proto.mutation || proto.mutation.proccode !== pixel.proccode) continue;
-        this._pixelBodyBackup = {
+        if (!proto || !proto.mutation || !set.has(proto.mutation.proccode)) continue;
+        this._procedureBackups.push({
           blockId: id,
           originalNext: b.next,
           targetBlocks: target.blocks
-        };
+        });
         b.next = null;
-        return;
       }
     }
   }
-  _restorePixelOnCPU() {
-    if (!this._pixelBodyBackup) return;
-    const {
-      blockId,
-      originalNext,
-      targetBlocks
-    } = this._pixelBodyBackup;
-    const b = targetBlocks._blocks[blockId];
-    if (b) b.next = originalNext;
-    this._pixelBodyBackup = null;
+  _restoreProceduresOnCPU() {
+    if (!this._procedureBackups) return;
+    for (const backup of this._procedureBackups) {
+      const b = backup.targetBlocks._blocks[backup.blockId];
+      if (b) b.next = backup.originalNext;
+    }
+    this._procedureBackups = [];
   }
   recompileShader() {
     if (this.vm && this.vm.runtime) this._tryEnableShader();
@@ -86945,7 +88002,10 @@ class Scaffolding extends EventTarget {
     this.vm.on('MONITORS_UPDATE', this._onmonitorsupdate.bind(this));
     this.vm.runtime.on('QUESTION', this._onquestion.bind(this));
     this.vm.on('PROJECT_RUN_START', () => this.dispatchEvent(new Event('PROJECT_RUN_START')));
-    this.vm.on('PROJECT_RUN_STOP', () => this.dispatchEvent(new Event('PROJECT_RUN_STOP')));
+    this.vm.on('PROJECT_RUN_STOP', () => {
+      if (this._kernelScheduler) this._kernelScheduler.stop();
+      this.dispatchEvent(new Event('PROJECT_RUN_STOP'));
+    });
     this._placeShaderCanvas();
     this._rendererReady = Promise.resolve();
     try {
@@ -87141,6 +88201,9 @@ class Scaffolding extends EventTarget {
       // changing, so the pixel shader eventually sees the populated data.
       this._startShaderListRefresh();
     }
+    if (this._kernelScheduler && !this._kernelScheduler.running) {
+      this._kernelScheduler.start();
+    }
   }
   _startShaderListRefresh() {
     if (this._shaderListRefreshTimer) return;
@@ -87195,6 +88258,7 @@ class Scaffolding extends EventTarget {
   }
   stopAll() {
     this.vm.stopAll();
+    if (this._kernelScheduler) this._kernelScheduler.stop();
   }
   _lookupVariable(name, type) {
     const variable = this.vm.runtime.getTargetForStage().lookupVariableByNameAndType(name, type);
@@ -87279,6 +88343,8 @@ class ScratchShaderCompiler {
     this._procedures = new Map();
     this._pixel = null;
     this._pixelFnName = null;
+    this._kernel = null;
+    this._kernelMode = 'screen';
     this._varUsage = new Map();
     this._listUsage = new Map();
     this._uniformVars = [];
@@ -87338,6 +88404,12 @@ class ScratchShaderCompiler {
     return f ? f.value : null;
   }
   compile() {
+    return this.compileKernel(null, 'screen');
+  }
+  compileKernel(kernel) {
+    let mode = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 'screen';
+    this._kernel = kernel;
+    this._kernelMode = mode;
     this._discoverProcedures();
     if (this._procedures.size === 0) {
       return {
@@ -87346,21 +88418,41 @@ class ScratchShaderCompiler {
         errors: this.errors
       };
     }
-    this._pixel = this._findPixel();
-    if (!this._pixel) {
-      return {
-        found: false,
-        warnings: this.warnings,
-        errors: this.errors
-      };
-    }
-    if (this._pixel.isReporter) {
-      this.errors.push('The "pixel" block must be a command (stack) block, not a reporter.');
-      return {
-        found: true,
-        warnings: this.warnings,
-        errors: this.errors
-      };
+    if (kernel) {
+      const info = this._procedures.get(kernel.proccode);
+      if (!info) {
+        return {
+          found: false,
+          warnings: this.warnings,
+          errors: this.errors
+        };
+      }
+      this._pixel = info;
+      if (this._pixel.isReporter) {
+        this.errors.push("The \"".concat(kernel.proccode, "\" block must be a command (stack) block, not a reporter."));
+        return {
+          found: true,
+          warnings: this.warnings,
+          errors: this.errors
+        };
+      }
+    } else {
+      this._pixel = this._findPixel();
+      if (!this._pixel) {
+        return {
+          found: false,
+          warnings: this.warnings,
+          errors: this.errors
+        };
+      }
+      if (this._pixel.isReporter) {
+        this.errors.push('The "pixel" block must be a command (stack) block, not a reporter.');
+        return {
+          found: true,
+          warnings: this.warnings,
+          errors: this.errors
+        };
+      }
     }
     this._pruneUnreachable();
     const cycle = this._detectRecursion();
@@ -87389,6 +88481,7 @@ class ScratchShaderCompiler {
       variableUniforms: this._uniformVars.slice(),
       listTextures: this._listTextures.slice(),
       pixelArgNames: this._pixel.paramNames.slice(),
+      kernelMode: this._kernelMode,
       warnings: this.warnings,
       errors: this.errors
     };
@@ -87774,6 +88867,15 @@ class ScratchShaderCompiler {
       this._generateProcedureBody(code, info, lines);
     }
     lines.push('');
+    this._generateMain(lines);
+    if (!this._colorWritten) {
+      this.warnings.push('The "color" variable was never set inside the pixel block; the output will be black.');
+    }
+    return lines.join('\n');
+  }
+  _generateMain(lines) {
+    const mode = this._kernelMode;
+    const paramCount = this._pixel.paramNames.length;
     lines.push('void main() {');
     // Reset mutable (shader-written) lists to empty for this pixel.
     if (this._globalMutableArrays && this._globalMutableArrays.length) {
@@ -87787,9 +88889,21 @@ class ScratchShaderCompiler {
       lines.push("  ".concat(v, " = ").concat(this._globalVarInitializers.get(v) || '0.0', ";"));
     }
     lines.push('  sc_color = 0.0;');
-    lines.push('  float sc_px = gl_FragCoord.x - (u_resolution.x * 0.5);');
-    lines.push('  float sc_py = gl_FragCoord.y - (u_resolution.y * 0.5);');
-    lines.push("  ".concat(this._pixelFnName, "(sc_px, sc_py);"));
+    if (mode === 'compute') {
+      if (paramCount !== 1) {
+        this.errors.push("Compute kernel \"".concat(this._pixel.proccode, "\" must accept exactly one parameter (index); found ").concat(paramCount, "."));
+      }
+      // Scratch indices are 1-based, so the first fragment (idx=0) maps to list item 1.
+      lines.push('  float sc_idx = gl_FragCoord.x + (gl_FragCoord.y * u_resolution.x) + 1.0;');
+      lines.push("  ".concat(this._pixelFnName, "(sc_idx);"));
+    } else {
+      if (paramCount !== 2) {
+        this.errors.push("Screen kernel \"".concat(this._pixel.proccode, "\" must accept exactly two parameters (x, y); found ").concat(paramCount, "."));
+      }
+      lines.push('  float sc_px = gl_FragCoord.x - (u_resolution.x * 0.5);');
+      lines.push('  float sc_py = gl_FragCoord.y - (u_resolution.y * 0.5);');
+      lines.push("  ".concat(this._pixelFnName, "(sc_px, sc_py);"));
+    }
     lines.push('  float c = floor(sc_color + 0.5);');
     lines.push('  c = clamp(c, 0.0, 16777215.0);');
     lines.push('  float cr = floor(c / 65536.0);');
@@ -87797,10 +88911,6 @@ class ScratchShaderCompiler {
     lines.push('  float cb = mod(c, 256.0);');
     lines.push('  gl_FragColor = vec4(cr / 255.0, cg / 255.0, cb / 255.0, 1.0);');
     lines.push('}');
-    if (!this._colorWritten) {
-      this.warnings.push('The "color" variable was never set inside the pixel block; the output will be black.');
-    }
-    return lines.join('\n');
   }
   _stageVariableValues() {
     const values = new Map();
@@ -88451,6 +89561,13 @@ class ShaderRenderer {
     this._lastVarVals = {};
     this._lastW = -1;
     this._lastH = -1;
+    this._computeProgram = null;
+    this._computeFbo = null;
+    this._computeTexture = null;
+    this._computeWidth = 0;
+    this._computeHeight = 0;
+    this._computeColorBufferFloat = this.gl.getExtension('WEBGL_color_buffer_float');
+    this._computeFloatType = this._floatExt && this._computeColorBufferFloat ? this.gl.FLOAT : null;
   }
   getGlErrors() {
     return this._glErrors.slice();
@@ -88483,36 +89600,46 @@ class ShaderRenderer {
     this._lastVarVals = {};
     this._lastW = -1;
     this._lastH = -1;
-    const program = this._link(compiled.vertexSource, compiled.fragmentSource);
-    if (!program) return false;
+    const compiledProgram = this._compileProgram(compiled);
+    if (!compiledProgram) return false;
     if (this._program) this.gl.deleteProgram(this._program);
-    this._program = program;
+    this._program = compiledProgram.program;
+    this._locations = compiledProgram.locations;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, QUAD, gl.STATIC_DRAW);
+    gl.useProgram(this._program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
+    gl.enableVertexAttribArray(this._locations.aPos);
+    gl.vertexAttribPointer(this._locations.aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    this._glStateReady = true;
+    return true;
+  }
+  _compileProgram(compiled) {
+    const gl = this.gl;
+    const program = this._link(compiled.vertexSource, compiled.fragmentSource);
+    if (!program) return null;
     const posLoc = gl.getAttribLocation(program, 'a_pos');
-    this._locations = {
+    const locations = {
       aPos: posLoc,
       uResolution: gl.getUniformLocation(program, 'u_resolution'),
       uTime: gl.getUniformLocation(program, 'u_time'),
       vars: [],
-      lists: []
+      listAtlas: null
     };
     for (const v of compiled.variableUniforms || []) {
-      this._locations.vars.push({
+      locations.vars.push({
         name: v.scratchName,
         uniform: v.uniform,
         loc: gl.getUniformLocation(program, v.uniform)
       });
     }
-    this._prepareListLocations(compiled);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, QUAD, gl.STATIC_DRAW);
-    gl.useProgram(this._program);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
-    gl.enableVertexAttribArray(posLoc);
-    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0, 0, 0, 0);
-    this._glStateReady = true;
-    return true;
+    locations.listAtlas = this._buildListAtlasLocations(program, compiled.listTextures || []);
+    return {
+      program,
+      locations
+    };
   }
   setListReader(fn) {
     this._readList = fn || (() => null);
@@ -88549,7 +89676,7 @@ class ShaderRenderer {
       this._updateListAtlasInPlace(existing, packInfo, maxLen);
     } else {
       this._destroyListTextures();
-      this._createListAtlas(packInfo, maxLen);
+      this._listTextures = [this._buildListAtlas(packInfo, maxLen)];
     }
   }
   _updateListAtlasInPlace(atlas, packs, maxLen) {
@@ -88570,7 +89697,7 @@ class ShaderRenderer {
     }
     if (totalHeight !== atlas.height) {
       this._destroyListTextures();
-      this._createListAtlas(packs, maxLen);
+      this._listTextures = [this._buildListAtlas(packs, maxLen)];
       return;
     }
     const texels = width * totalHeight;
@@ -88614,7 +89741,7 @@ class ShaderRenderer {
       };
     });
   }
-  _createListAtlas(packs, maxLen) {
+  _buildListAtlas(packs, maxLen) {
     const gl = this.gl;
     const width = Math.min(maxLen, MAX_TEX_SIZE);
     const packHeights = packs.map(channels => {
@@ -88665,7 +89792,11 @@ class ShaderRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    this._listTextures = [{
+    const err = gl.getError();
+    if (err) {
+      console.error('[scaffolding-shader] Failed to upload list atlas texture:', err);
+    }
+    return {
       texture: tex,
       width,
       height: totalHeight,
@@ -88680,29 +89811,27 @@ class ShaderRenderer {
           lengths
         };
       })
-    }];
-    const err = gl.getError();
-    if (err) {
-      console.error('[scaffolding-shader] Failed to upload list atlas texture:', err);
-    }
+    };
   }
   _prepareListLocations(compiled) {
+    this._locations.listAtlas = this._buildListAtlasLocations(this._program, compiled.listTextures || []);
+  }
+  _buildListAtlasLocations(program, listSpecs) {
     const gl = this.gl;
-    const program = this._program;
-    const listSpecs = compiled.listTextures || [];
     const maxTexIndex = listSpecs.reduce((m, s) => Math.max(m, s.texIndex), -1);
-    this._locations.listAtlas = {
+    const listAtlas = {
       tex: gl.getUniformLocation(program, 'sc_ltex'),
       size: gl.getUniformLocation(program, 'sc_ltex_size'),
       sizeInv: gl.getUniformLocation(program, 'sc_ltex_size_inv'),
       packs: []
     };
     for (let pi = 0; pi <= maxTexIndex; pi++) {
-      this._locations.listAtlas.packs.push({
+      listAtlas.packs.push({
         llen: gl.getUniformLocation(program, "sc_llen_".concat(pi)),
         lmeta: gl.getUniformLocation(program, "sc_lmeta_".concat(pi))
       });
     }
+    return listAtlas;
   }
   _compileShader(type, src) {
     const gl = this.gl;
@@ -88828,6 +89957,127 @@ class ShaderRenderer {
     }
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
+  _collectPackInfo(compiled, readList) {
+    readList = readList || this._readList;
+    const listSpecs = compiled.listTextures || [];
+    const maxTexIndex = listSpecs.reduce((m, s) => Math.max(m, s.texIndex), -1);
+    const numPacks = maxTexIndex + 1;
+    if (!numPacks) return null;
+    let maxLen = 1;
+    const packInfo = new Array(numPacks).fill(null);
+    for (let pi = 0; pi < numPacks; pi++) {
+      const channels = [null, null, null, null];
+      for (const spec of listSpecs) {
+        if (spec.texIndex !== pi) continue;
+        const data = readList(spec.scratchName);
+        if (!data) continue;
+        channels[spec.channel] = {
+          name: spec.scratchName,
+          data
+        };
+        if (data.length > maxLen) maxLen = data.length;
+      }
+      packInfo[pi] = channels;
+    }
+    return {
+      packInfo,
+      maxLen
+    };
+  }
+  _buildAtlasForCompiled(compiled, readList) {
+    const info = this._collectPackInfo(compiled, readList);
+    if (!info) return null;
+    return this._buildListAtlas(info.packInfo, info.maxLen);
+  }
+  _ensureComputeTarget(width, height) {
+    const gl = this.gl;
+    if (this._computeTexture && this._computeWidth === width && this._computeHeight === height) {
+      return;
+    }
+    if (this._computeFbo) gl.deleteFramebuffer(this._computeFbo);
+    if (this._computeTexture) gl.deleteTexture(this._computeTexture);
+    this._computeWidth = width;
+    this._computeHeight = height;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      console.error('[scaffolding-shader] Compute FBO incomplete:', status);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this._computeFbo = fbo;
+    this._computeTexture = tex;
+  }
+  runComputePass(compiled, width, height, readVariable, readList) {
+    const gl = this.gl;
+    if (!compiled || !compiled.fragmentSource) return null;
+    this._ensureComputeTarget(width, height);
+    const programInfo = this._compileProgram(compiled);
+    if (!programInfo) {
+      console.error('[scaffolding-shader] Compute program failed to compile');
+      return null;
+    }
+    if (this._computeProgram) gl.deleteProgram(this._computeProgram);
+    this._computeProgram = programInfo.program;
+    const prevFbo = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this._computeFbo);
+    gl.viewport(0, 0, width, height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(this._computeProgram);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
+    gl.enableVertexAttribArray(programInfo.locations.aPos);
+    gl.vertexAttribPointer(programInfo.locations.aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(programInfo.locations.uResolution, width, height);
+    gl.uniform1f(programInfo.locations.uTime, 0);
+    const variableCache = readVariable ? readVariable() : this._readVariableCache();
+    for (const v of programInfo.locations.vars) {
+      const val = variableCache[v.name] !== undefined ? variableCache[v.name] : 0;
+      gl.uniform1f(v.loc, val);
+    }
+    const atlas = this._buildAtlasForCompiled(compiled, readList);
+    const atlasLoc = programInfo.locations.listAtlas;
+    if (atlas && atlasLoc) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, atlas.texture);
+      gl.uniform1i(atlasLoc.tex, 0);
+      gl.uniform2f(atlasLoc.size, atlas.width, atlas.height);
+      gl.uniform2f(atlasLoc.sizeInv, 1 / atlas.width, 1 / atlas.height);
+      for (let pi = 0; pi < atlas.packs.length; pi++) {
+        const pack = atlas.packs[pi];
+        const loc = atlasLoc.packs[pi];
+        if (!pack || !loc) continue;
+        gl.uniform4f(loc.llen, pack.lengths[0] || 0, pack.lengths[1] || 0, pack.lengths[2] || 0, pack.lengths[3] || 0);
+        gl.uniform3f(loc.lmeta, atlas.width, pack.height, pack.offset);
+      }
+    }
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    const pixels = new Uint8Array(width * height * 4);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, prevFbo);
+
+    // Clean up temporary atlas texture.
+    if (atlas && atlas.texture) {
+      gl.deleteTexture(atlas.texture);
+    }
+    this._glStateReady = false;
+    const out = new Float32Array(width * height);
+    for (let i = 0; i < out.length; i++) {
+      const r = pixels[i * 4];
+      const g = pixels[i * 4 + 1];
+      const b = pixels[i * 4 + 2];
+      out[i] = r * 65536 + g * 256 + b;
+    }
+    return out;
+  }
   invalidateUniformCache() {
     this._uniformCache = null;
   }
@@ -88847,6 +90097,18 @@ class ShaderRenderer {
     if (this._program) {
       this.gl.deleteProgram(this._program);
       this._program = null;
+    }
+    if (this._computeProgram) {
+      this.gl.deleteProgram(this._computeProgram);
+      this._computeProgram = null;
+    }
+    if (this._computeFbo) {
+      this.gl.deleteFramebuffer(this._computeFbo);
+      this._computeFbo = null;
+    }
+    if (this._computeTexture) {
+      this.gl.deleteTexture(this._computeTexture);
+      this._computeTexture = null;
     }
     if (this._buffer) {
       this.gl.deleteBuffer(this._buffer);

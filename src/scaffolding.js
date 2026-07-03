@@ -7,6 +7,8 @@ import Question from './question.js';
 import defaultMessages from './messages.json';
 import ScratchShaderCompiler from './shader-compiler.js';
 import ShaderRenderer from './shader-renderer.js';
+import GpuKernelDetector from './gpu-kernel-detector.js';
+import {GpuKernelScheduler} from './gpu-kernel-scheduler.js';
 
 /**
  * @param {MouseEvent|TouchEvent} event
@@ -71,6 +73,7 @@ class Scaffolding extends EventTarget {
     this.shaderOnTop = true;
     this.shaderEnabled = false;
     this.shaderDiagnostics = null;
+    this._kernelScheduler = null;
 
     this._monitors = new Map();
     this._mousedownPosition = null;
@@ -173,8 +176,39 @@ class Scaffolding extends EventTarget {
 
     const lines = [];
     if (!diag.found) {
-      lines.push('No "pixel" custom block found in this project.');
+      lines.push('No screen kernel (e.g. "pixel(x,y)") found in this project.');
     }
+
+    const kernels = diag.kernels || [];
+    if (kernels.length) {
+      lines.push('GPU kernels:');
+      for (const k of kernels) {
+        lines.push(`  • [${k.type}] ${k.proccode} (${k.status})`);
+      }
+    }
+
+    const loopCandidates = diag.loopCandidates || [];
+    if (loopCandidates.length) {
+      lines.push(`Parallelizable loops found: ${loopCandidates.length}`);
+      for (const c of loopCandidates.slice(0, 5)) {
+        lines.push(`  • ${c.opcode} in ${c.location}`);
+      }
+      if (loopCandidates.length > 5) {
+        lines.push(`  …and ${loopCandidates.length - 5} more`);
+      }
+    }
+
+    const penCandidates = diag.penCandidates || [];
+    if (penCandidates.length) {
+      lines.push(`Pen routines found: ${penCandidates.length}`);
+      for (const c of penCandidates.slice(0, 5)) {
+        lines.push(`  • ${c.proccode}`);
+      }
+      if (penCandidates.length > 5) {
+        lines.push(`  …and ${penCandidates.length - 5} more`);
+      }
+    }
+
     if (errors) {
       lines.push('Errors:');
       for (const e of diag.errors) lines.push('  • ' + e);
@@ -218,51 +252,105 @@ class Scaffolding extends EventTarget {
     if (!this._shaderRenderer) return;
     this._shaderRenderer.stop();
     if (this._shaderRenderer.clearGlErrors) this._shaderRenderer.clearGlErrors();
-    const compiler = new ScratchShaderCompiler(this.vm.runtime);
-    let result;
-    try {
-      result = compiler.compile();
-    } catch (e) {
-      console.error('[scaffolding-shader] Compiler crashed:', e);
-      this.shaderDiagnostics = { found: false, warnings: [], errors: [String(e && e.message || e)] };
-      this._shaderCanvas.style.display = 'none';
-      this.shaderEnabled = false;
-      this._updateShaderStatus();
-      return;
+    if (this._kernelScheduler) {
+      this._kernelScheduler.stop();
+      this._kernelScheduler = null;
     }
-    this.shaderDiagnostics = {
-      found: result.found,
-      warnings: result.warnings,
-      errors: result.errors
+    this._restoreProceduresOnCPU();
+
+    const runtime = this.vm && this.vm.runtime;
+    if (!runtime) return;
+
+    const detector = new GpuKernelDetector(runtime);
+    const detection = detector.detect();
+    const screenKernel = detection.kernels.find((k) => k.type === 'screen' && k.status === 'ready');
+    const diagnostics = {
+      found: false,
+      warnings: detection.warnings.slice(),
+      errors: [],
+      kernels: detection.kernels,
+      loopCandidates: detection.loopCandidates,
+      penCandidates: detection.penCandidates
     };
-    if (result.warnings.length) {
-      console.warn('[scaffolding-shader] Warnings:\n  ' + result.warnings.join('\n  '));
-    }
-    if (!result.found || result.errors.length) {
-      this._shaderCanvas.style.display = 'none';
-      this.shaderEnabled = false;
-      if (result.errors.length) {
-        console.error('[scaffolding-shader] Errors:\n  ' + result.errors.join('\n  '));
+
+    let screenCompiled = null;
+    let screenCompiler = null;
+    if (screenKernel) {
+      screenCompiler = new ScratchShaderCompiler(runtime);
+      try {
+        screenCompiled = screenCompiler.compileKernel(screenKernel, 'screen');
+      } catch (e) {
+        diagnostics.errors.push(String(e && e.message || e));
       }
-      this._updateShaderStatus();
-      return;
+      if (screenCompiled) {
+        diagnostics.found = screenCompiled.found;
+        diagnostics.warnings.push(...screenCompiled.warnings);
+        diagnostics.errors.push(...screenCompiled.errors);
+      }
     }
-    const ok = this._shaderRenderer.setProgram(result, (name) => this._readShaderVariable(name));
-    if (!ok) {
+
+    if (diagnostics.warnings.length) {
+      console.warn('[scaffolding-shader] Warnings:\n  ' + diagnostics.warnings.join('\n  '));
+    }
+    if (screenCompiled && screenCompiled.errors.length) {
+      this.shaderDiagnostics = diagnostics;
       this._shaderCanvas.style.display = 'none';
       this.shaderEnabled = false;
-      this.shaderDiagnostics.errors = (this.shaderDiagnostics.errors || []).concat(['GPU program failed to compile (see console).']);
+      console.error('[scaffolding-shader] Errors:\n  ' + diagnostics.errors.join('\n  '));
       this._updateShaderStatus();
       return;
     }
-    this._shaderRenderer.setVariableCacheProvider(() => this._buildVariableCache());
-    this._shaderRenderer.setListReader((name) => this._readShaderListCached(name));
-    this._shaderRenderer.uploadListData();
-    this._shaderRenderer.resize(this.width * this.shaderScale, this.height * this.shaderScale);
-    this._shaderCanvas.style.display = 'block';
-    this._shaderRenderer.resetTime();
-    this._shaderRenderer.start();
-    this._skipPixelOnCPU(compiler);
+
+    let screenEnabled = false;
+    if (screenCompiled && screenCompiled.found) {
+      const ok = this._shaderRenderer.setProgram(screenCompiled, (name) => this._readShaderVariable(name));
+      if (!ok) {
+        diagnostics.errors.push('GPU program failed to compile (see console).');
+        this.shaderDiagnostics = diagnostics;
+        this._shaderCanvas.style.display = 'none';
+        this.shaderEnabled = false;
+        this._updateShaderStatus();
+        return;
+      }
+      this._shaderRenderer.setVariableCacheProvider(() => this._buildVariableCache());
+      this._shaderRenderer.setListReader((name) => this._readShaderListCached(name));
+      this._shaderRenderer.uploadListData();
+      this._shaderRenderer.resize(this.width * this.shaderScale, this.height * this.shaderScale);
+      this._shaderCanvas.style.display = 'block';
+      this._shaderRenderer.resetTime();
+      this._shaderRenderer.start();
+      screenEnabled = true;
+    } else {
+      this._shaderCanvas.style.display = 'none';
+    }
+
+    this._kernelScheduler = new GpuKernelScheduler(this, this._shaderRenderer);
+    const schedulerDiagnostics = this._kernelScheduler.detectAndCompile();
+    diagnostics.kernels = schedulerDiagnostics.detected;
+    diagnostics.loopCandidates = schedulerDiagnostics.loopCandidates;
+    diagnostics.penCandidates = schedulerDiagnostics.penCandidates;
+    diagnostics.warnings.push(...schedulerDiagnostics.warnings);
+    if (this._kernelScheduler.kernels.length > 0) {
+      this._kernelScheduler.start();
+    }
+
+    const computeEnabled = this._kernelScheduler.kernels.length > 0;
+    if (!screenEnabled && !computeEnabled) {
+      this.shaderDiagnostics = diagnostics;
+      this.shaderEnabled = false;
+      this._updateShaderStatus();
+      return;
+    }
+
+    const proccodesToSkip = [];
+    if (screenEnabled && screenKernel) proccodesToSkip.push(screenKernel.proccode);
+    if (detection.renderPattern) proccodesToSkip.push(detection.renderPattern.renderProccode);
+    for (const entry of this._kernelScheduler.kernels) {
+      proccodesToSkip.push(entry.kernel.proccode);
+    }
+    this._skipProceduresOnCPU(proccodesToSkip);
+
+    this.shaderDiagnostics = diagnostics;
     this.shaderEnabled = true;
     this._updateShaderStatus();
   }
@@ -328,17 +416,22 @@ class Scaffolding extends EventTarget {
 
   disableShader () {
     if (this._shaderRenderer) this._shaderRenderer.stop();
+    if (this._kernelScheduler) {
+      this._kernelScheduler.stop();
+      this._kernelScheduler = null;
+    }
     if (this._shaderCanvas) this._shaderCanvas.style.display = 'none';
-    this._restorePixelOnCPU();
+    this._restoreProceduresOnCPU();
     this.shaderEnabled = false;
     this._updateShaderStatus();
   }
 
-  _skipPixelOnCPU (compiler) {
-    this._restorePixelOnCPU();
-    const pixel = compiler._pixel;
-    if (!pixel || !pixel.proccode) return;
+  _skipProceduresOnCPU (proccodes) {
+    this._restoreProceduresOnCPU();
+    if (!proccodes || !proccodes.length) return;
+    const set = new Set(proccodes);
     const targets = (this.vm && this.vm.runtime && this.vm.runtime.targets) || [];
+    this._procedureBackups = [];
     for (const target of targets) {
       if (!target || !target.blocks || !target.blocks._blocks) continue;
       for (const id in target.blocks._blocks) {
@@ -346,20 +439,20 @@ class Scaffolding extends EventTarget {
         if (b.opcode !== 'procedures_definition') continue;
         const protoId = b.inputs && b.inputs.custom_block && b.inputs.custom_block.block;
         const proto = protoId && target.blocks._blocks[protoId];
-        if (!proto || !proto.mutation || proto.mutation.proccode !== pixel.proccode) continue;
-        this._pixelBodyBackup = { blockId: id, originalNext: b.next, targetBlocks: target.blocks };
+        if (!proto || !proto.mutation || !set.has(proto.mutation.proccode)) continue;
+        this._procedureBackups.push({ blockId: id, originalNext: b.next, targetBlocks: target.blocks });
         b.next = null;
-        return;
       }
     }
   }
 
-  _restorePixelOnCPU () {
-    if (!this._pixelBodyBackup) return;
-    const { blockId, originalNext, targetBlocks } = this._pixelBodyBackup;
-    const b = targetBlocks._blocks[blockId];
-    if (b) b.next = originalNext;
-    this._pixelBodyBackup = null;
+  _restoreProceduresOnCPU () {
+    if (!this._procedureBackups) return;
+    for (const backup of this._procedureBackups) {
+      const b = backup.targetBlocks._blocks[backup.blockId];
+      if (b) b.next = backup.originalNext;
+    }
+    this._procedureBackups = [];
   }
 
   recompileShader () {
@@ -649,7 +742,10 @@ class Scaffolding extends EventTarget {
     this.vm.on('MONITORS_UPDATE', this._onmonitorsupdate.bind(this));
     this.vm.runtime.on('QUESTION', this._onquestion.bind(this));
     this.vm.on('PROJECT_RUN_START', () => this.dispatchEvent(new Event('PROJECT_RUN_START')));
-    this.vm.on('PROJECT_RUN_STOP', () => this.dispatchEvent(new Event('PROJECT_RUN_STOP')));
+    this.vm.on('PROJECT_RUN_STOP', () => {
+      if (this._kernelScheduler) this._kernelScheduler.stop();
+      this.dispatchEvent(new Event('PROJECT_RUN_STOP'));
+    });
 
     this._placeShaderCanvas();
     this._rendererReady = Promise.resolve();
@@ -873,6 +969,9 @@ class Scaffolding extends EventTarget {
       // changing, so the pixel shader eventually sees the populated data.
       this._startShaderListRefresh();
     }
+    if (this._kernelScheduler && !this._kernelScheduler.running) {
+      this._kernelScheduler.start();
+    }
   }
 
   _startShaderListRefresh () {
@@ -931,6 +1030,7 @@ class Scaffolding extends EventTarget {
 
   stopAll () {
     this.vm.stopAll();
+    if (this._kernelScheduler) this._kernelScheduler.stop();
   }
 
   _lookupVariable(name, type) {
