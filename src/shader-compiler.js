@@ -725,10 +725,15 @@ export class ScratchShaderCompiler {
         const times = this._inputExpr(b, 'TIMES');
         const body = this._substack(b, 'SUBSTACK', ind + '  ');
         const literal = this._literalInt(b.inputs && b.inputs.TIMES);
-        if (literal !== null && literal >= 0 && literal <= MAX_UNROLL) {
-          const out = [];
-          for (let i = 0; i < literal; i++) out.push(body);
-          return out.join('\n');
+        if (literal !== null) {
+          if (literal >= 0 && literal <= MAX_UNROLL) {
+            const out = [];
+            for (let i = 0; i < literal; i++) out.push(body);
+            return out.join('\n');
+          }
+          if (literal > MAX_LOOP) {
+            this.warnings.push(`Loop repeats ${literal} times but shader supports up to ${MAX_LOOP}; result may be incorrect.`);
+          }
         }
         const lv = this._loopVar();
         return `${ind}for (int ${lv} = 0; ${lv} < ${MAX_LOOP}; ${lv}++) {\n${ind}  if (float(${lv}) >= ${times}) break;\n${body}\n${ind}}`;
@@ -749,6 +754,10 @@ export class ScratchShaderCompiler {
         const name = this._getField(b, 'VARIABLE');
         const count = this._inputExpr(b, 'VALUE');
         const body = this._substack(b, 'SUBSTACK', ind + '  ');
+        const literal = this._literalInt(b.inputs && b.inputs.VALUE);
+        if (literal !== null && literal > MAX_LOOP) {
+          this.warnings.push(`for-each iterates ${literal} times but shader supports up to ${MAX_LOOP}; result may be incorrect.`);
+        }
         const lv = this._loopVar();
         const target = this._varTarget(name);
         return `${ind}for (int ${lv} = 0; ${lv} < ${MAX_LOOP}; ${lv}++) {\n${ind}  if (float(${lv}) >= ${count}) break;\n${ind}  ${target} = float(${lv}) + 1.0;\n${body}\n${ind}}`;
@@ -785,6 +794,7 @@ export class ScratchShaderCompiler {
         return `${ind}return;`;
       }
       case 'control_forever': {
+        this.warnings.push('"forever" loop is compiled as a fixed 256-iteration loop in shader mode; it will not run forever.');
         const foreverBody = this._substack(b, 'SUBSTACK', ind + '  ');
         const fv = this._loopVar();
         return `${ind}for (int ${fv} = 0; ${fv} < ${MAX_LOOP}; ${fv}++) {\n${foreverBody}\n${ind}}`;

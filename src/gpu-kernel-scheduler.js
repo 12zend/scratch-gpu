@@ -8,9 +8,10 @@ const getProcLabel = (proccode) => proccode.replace(/%[nsb]/g, '').trim().toLowe
 const generateId = () => 'gpu_' + Math.random().toString(36).slice(2) + '_' + Date.now();
 
 export class GpuKernelScheduler {
-  constructor (scaffolding, shaderRenderer) {
+  constructor (scaffolding, shaderRenderer, restoreCpuCallback) {
     this.scaffolding = scaffolding;
     this.shaderRenderer = shaderRenderer;
+    this._restoreCpuCallback = restoreCpuCallback || null;
     this.kernels = [];
     this.diagnostics = {
       detected: [],
@@ -20,6 +21,8 @@ export class GpuKernelScheduler {
     };
     this.running = false;
     this._rafId = null;
+    this._kernelFailures = new Map();
+    this._maxKernelFailures = 3;
   }
 
   detectAndCompile () {
@@ -129,13 +132,41 @@ export class GpuKernelScheduler {
       () => this.scaffolding._buildVariableCache(),
       (name) => this.scaffolding._readShaderList(name)
     );
-    if (!result) return;
+    if (!result) {
+      this._handleKernelFailure(entry);
+      return;
+    }
+
+    this._kernelFailures.delete(entry.kernel.proccode);
 
     const out = new Array(length);
     for (let i = 0; i < length; i++) {
       out[i] = result[i];
     }
     list.value = out;
+  }
+
+  _handleKernelFailure (entry) {
+    const proccode = entry.kernel.proccode;
+    const failures = (this._kernelFailures.get(proccode) || 0) + 1;
+    this._kernelFailures.set(proccode, failures);
+    const msg = `Compute kernel "${proccode}" runtime failure (${failures}/${this._maxKernelFailures})`;
+    this.diagnostics.warnings.push(msg);
+    console.warn(`[gpu-kernel-scheduler] ${msg}`);
+
+    if (failures >= this._maxKernelFailures) {
+      const fallbackMsg = `Disabling GPU compute kernel "${proccode}" and falling back to CPU execution.`;
+      this.diagnostics.warnings.push(fallbackMsg);
+      console.warn(`[gpu-kernel-scheduler] ${fallbackMsg}`);
+      if (this._restoreCpuCallback) {
+        try {
+          this._restoreCpuCallback(proccode);
+        } catch (e) {
+          console.error('[gpu-kernel-scheduler] Failed to restore CPU execution:', e);
+        }
+      }
+      this.kernels = this.kernels.filter((k) => k.kernel.proccode !== proccode);
+    }
   }
 
   _lookupOrCreateList (name) {

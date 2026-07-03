@@ -189,9 +189,11 @@ class Scaffolding extends EventTarget {
 
     const loopCandidates = diag.loopCandidates || [];
     if (loopCandidates.length) {
-      lines.push(`Parallelizable loops found: ${loopCandidates.length}`);
+      const auto = loopCandidates.filter((c) => c.parallelizable).length;
+      lines.push(`Parallelizable loops found: ${auto}/${loopCandidates.length}`);
       for (const c of loopCandidates.slice(0, 5)) {
-        lines.push(`  • ${c.opcode} in ${c.location}`);
+        const badge = c.parallelizable ? '[GPU]' : (c.unrollable ? '[unroll]' : '[CPU]');
+        lines.push(`  • ${badge} ${c.opcode} in ${c.location}: ${c.reason}`);
       }
       if (loopCandidates.length > 5) {
         lines.push(`  …and ${loopCandidates.length - 5} more`);
@@ -324,7 +326,7 @@ class Scaffolding extends EventTarget {
       this._shaderCanvas.style.display = 'none';
     }
 
-    this._kernelScheduler = new GpuKernelScheduler(this, this._shaderRenderer);
+    this._kernelScheduler = new GpuKernelScheduler(this, this._shaderRenderer, (proccode) => this._restoreProcedureOnCPU(proccode));
     const schedulerDiagnostics = this._kernelScheduler.detectAndCompile();
     diagnostics.kernels = schedulerDiagnostics.detected;
     diagnostics.loopCandidates = schedulerDiagnostics.loopCandidates;
@@ -432,6 +434,7 @@ class Scaffolding extends EventTarget {
     const set = new Set(proccodes);
     const targets = (this.vm && this.vm.runtime && this.vm.runtime.targets) || [];
     this._procedureBackups = [];
+    this._procedureBackupMap = new Map();
     for (const target of targets) {
       if (!target || !target.blocks || !target.blocks._blocks) continue;
       for (const id in target.blocks._blocks) {
@@ -440,7 +443,9 @@ class Scaffolding extends EventTarget {
         const protoId = b.inputs && b.inputs.custom_block && b.inputs.custom_block.block;
         const proto = protoId && target.blocks._blocks[protoId];
         if (!proto || !proto.mutation || !set.has(proto.mutation.proccode)) continue;
-        this._procedureBackups.push({ blockId: id, originalNext: b.next, targetBlocks: target.blocks });
+        const backup = { blockId: id, originalNext: b.next, targetBlocks: target.blocks, proccode: proto.mutation.proccode };
+        this._procedureBackups.push(backup);
+        this._procedureBackupMap.set(proto.mutation.proccode, backup);
         b.next = null;
       }
     }
@@ -453,6 +458,18 @@ class Scaffolding extends EventTarget {
       if (b) b.next = backup.originalNext;
     }
     this._procedureBackups = [];
+    this._procedureBackupMap = null;
+  }
+
+  _restoreProcedureOnCPU (proccode) {
+    if (!this._procedureBackupMap) return;
+    const backup = this._procedureBackupMap.get(proccode);
+    if (!backup) return;
+    const b = backup.targetBlocks._blocks[backup.blockId];
+    if (b) b.next = backup.originalNext;
+    this._procedureBackupMap.delete(proccode);
+    const idx = this._procedureBackups.indexOf(backup);
+    if (idx >= 0) this._procedureBackups.splice(idx, 1);
   }
 
   recompileShader () {
