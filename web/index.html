@@ -433,13 +433,7 @@
     return response.arrayBuffer();
   };
 
-  const loadFromUrl = async () => {
-    const input = urlInput.value;
-    const projectId = parseProjectId(input);
-    if (!projectId) {
-      log('invalid Scratch URL');
-      return;
-    }
+  const loadProjectById = async (projectId) => {
     loadUrlBtn.disabled = true;
     log('fetching project ' + projectId + '...');
     try {
@@ -459,10 +453,38 @@
     }
   };
 
+  const loadFromUrl = async () => {
+    const input = urlInput.value;
+    const projectId = parseProjectId(input);
+    if (!projectId) {
+      log('invalid Scratch URL');
+      return;
+    }
+    await loadProjectById(projectId);
+  };
+
+  const getProjectIdFromLocation = () => {
+    const path = location.pathname;
+    const numeric = path.match(/\/(\d+)\/?$/);
+    if (numeric) return numeric[1];
+    const projectMatch = path.match(/projects\/(\d+)/);
+    if (projectMatch) return projectMatch[1];
+    const params = new URLSearchParams(location.search);
+    if (params.has('project')) return params.get('project');
+    return null;
+  };
+
   loadUrlBtn.addEventListener('click', loadFromUrl);
   urlInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') loadFromUrl();
   });
+
+  // Auto-load from URL hash/path on page load.
+  const autoLoadProjectId = getProjectIdFromLocation();
+  if (autoLoadProjectId) {
+    urlInput.value = 'https://scratch.mit.edu/projects/' + autoLoadProjectId + '/';
+    loadProjectById(autoLoadProjectId);
+  }
 
   // Drag & drop
   const drop = document.getElementById('drop');
