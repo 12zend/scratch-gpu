@@ -162,6 +162,56 @@
     color: var(--muted-foreground);
   }
 
+  #url-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: min(720px, 85vw);
+    padding: 0.5rem 0.75rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  #url-bar input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) - 0.25rem);
+    background: var(--background);
+    color: var(--foreground);
+    font-size: 13px;
+  }
+  #url-bar input::placeholder {
+    color: var(--muted-foreground);
+  }
+  #url-bar button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) - 0.25rem);
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+  }
+  #url-bar button:hover {
+    opacity: 0.9;
+  }
+  #url-bar button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  #url-bar button svg {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+
   input[type="range"]#volume {
     -webkit-appearance: none;
     appearance: none;
@@ -222,6 +272,14 @@
     <input type="file" id="file-input" accept=".sb3">
     <div id="status">ready</div>
     <div id="container"></div>
+  </div>
+
+  <div id="url-bar">
+    <input type="text" id="scratch-url" placeholder="https://scratch.mit.edu/projects/12345678">
+    <button id="load-url" type="button">
+      <i data-lucide="link"></i>
+      Load
+    </button>
   </div>
 
   <div id="controls">
@@ -344,6 +402,66 @@
     if (audioEngine && audioEngine.inputNode) {
       audioEngine.inputNode.gain.value = value;
     }
+  });
+
+  // Scratch URL loading
+  const urlInput = document.getElementById('scratch-url');
+  const loadUrlBtn = document.getElementById('load-url');
+
+  const parseProjectId = (input) => {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    if (/^\d+$/.test(trimmed)) return trimmed;
+    const match = trimmed.match(/projects\/(\d+)/);
+    if (match) return match[1];
+    const twMatch = trimmed.match(/turbowarp\.org\/#?(\d+)/);
+    if (twMatch) return twMatch[1];
+    return null;
+  };
+
+  const getProjectMetadata = async (projectId) => {
+    const response = await fetch(`https://trampoline.turbowarp.org/api/projects/${projectId}`);
+    if (response.status === 404) throw new Error('Project not found or unshared');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  };
+
+  const getProjectData = async (projectId) => {
+    const metadata = await getProjectMetadata(projectId);
+    const response = await fetch(`https://projects.scratch.mit.edu/${projectId}?token=${metadata.project_token}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.arrayBuffer();
+  };
+
+  const loadFromUrl = async () => {
+    const input = urlInput.value;
+    const projectId = parseProjectId(input);
+    if (!projectId) {
+      log('invalid Scratch URL');
+      return;
+    }
+    loadUrlBtn.disabled = true;
+    log('fetching project ' + projectId + '...');
+    try {
+      const data = await getProjectData(projectId);
+      await s.loadProject(data);
+      drop.classList.add('hidden');
+      loaded = true;
+      log('green flag');
+      startProject();
+      if (s._shaderRenderer) s._shaderRenderer.render();
+      log('rendered: ' + s._shaderCanvas.width + 'x' + s._shaderCanvas.height);
+    } catch (err) {
+      log('load failed: ' + err.message);
+      console.error(err);
+    } finally {
+      loadUrlBtn.disabled = false;
+    }
+  };
+
+  loadUrlBtn.addEventListener('click', loadFromUrl);
+  urlInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') loadFromUrl();
   });
 
   // Drag & drop
