@@ -4,34 +4,82 @@
 <meta charset="utf-8">
 <title>scratch-gpu</title>
 <link rel="icon" href="data:,">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 <style>
+  :root {
+    --background: #09090b;
+    --foreground: #fafafa;
+    --card: #18181b;
+    --card-foreground: #fafafa;
+    --primary: #fafafa;
+    --primary-foreground: #18181b;
+    --secondary: #27272a;
+    --secondary-foreground: #fafafa;
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa;
+    --border: #27272a;
+    --radius: 0.75rem;
+    --ring: #d4d4d8;
+  }
+
+  * { box-sizing: border-box; }
+
   html, body {
     margin: 0;
     padding: 0;
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background: #000;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  #app {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 1rem;
+  }
+
+  #player-frame {
+    position: relative;
+    width: min(720px, 85vw);
+    aspect-ratio: 4 / 3;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+
+  #player-frame > #container {
+    position: absolute;
+    inset: 0;
   }
 
   #drop {
-    position: fixed;
+    position: absolute;
     inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-direction: column;
     gap: 12px;
-    color: rgba(255, 255, 255, 0.5);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--muted-foreground);
     font-size: 11px;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     transition: color 0.2s, background 0.2s;
     z-index: 10;
+    pointer-events: none;
   }
   #drop.over {
-    color: rgba(255, 255, 255, 0.95);
+    color: var(--foreground);
     background: rgba(255, 255, 255, 0.05);
   }
   #drop.hidden { display: none; }
@@ -39,9 +87,10 @@
     pointer-events: auto;
     text-decoration: underline;
     cursor: pointer;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--muted-foreground);
   }
-  /* Keep the file input off-screen but interactive so its click() is reliable. */
+  #drop .picker:hover { color: var(--foreground); }
+
   #file-input {
     position: absolute;
     left: -9999px;
@@ -52,17 +101,97 @@
   }
 
   #status {
-    position: fixed;
-    top: 8px;
-    left: 8px;
+    position: absolute;
+    top: 10px;
+    left: 12px;
     z-index: 20;
-    color: rgba(255, 255, 255, 0.5);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--muted-foreground);
     font-size: 10px;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     pointer-events: none;
     white-space: pre;
+  }
+
+  #controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  #controls button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) - 0.25rem);
+    background: var(--secondary);
+    color: var(--secondary-foreground);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  #controls button:hover {
+    background: var(--muted);
+    border-color: var(--ring);
+  }
+  #controls button:active {
+    transform: translateY(1px);
+  }
+  #controls button svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  #volume-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: 0.5rem;
+    padding-left: 0.75rem;
+    border-left: 1px solid var(--border);
+  }
+  #volume-group svg {
+    width: 1rem;
+    height: 1rem;
+    color: var(--muted-foreground);
+  }
+
+  input[type="range"]#volume {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 120px;
+    height: 4px;
+    background: var(--muted);
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  input[type="range"]#volume::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: var(--primary);
+    border-radius: 50%;
+    border: 2px solid var(--card);
+    box-shadow: 0 0 0 1px var(--border);
+    transition: transform 0.15s;
+  }
+  input[type="range"]#volume::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+  }
+  input[type="range"]#volume::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: var(--primary);
+    border-radius: 50%;
+    border: 2px solid var(--card);
+    box-shadow: 0 0 0 1px var(--border);
   }
 
   /* Hide everything inside scaffolding except the shader canvas. */
@@ -84,14 +213,35 @@
 </style>
 </head>
 <body>
-<div id="drop">
-  <div>drop .sb3 &nbsp;·&nbsp; esc to reset</div>
-  <label class="picker" id="picker" for="file-input">or click to choose file</label>
+<div id="app">
+  <div id="player-frame">
+    <div id="drop">
+      <div>drop .sb3 &nbsp;·&nbsp; esc to reset</div>
+      <label class="picker" id="picker" for="file-input">or click to choose file</label>
+    </div>
+    <input type="file" id="file-input" accept=".sb3">
+    <div id="status">ready</div>
+    <div id="container"></div>
+  </div>
+
+  <div id="controls">
+    <button id="play-pause" type="button" aria-label="Play">
+      <i data-lucide="play"></i>
+    </button>
+    <button id="reload" type="button" aria-label="Reload">
+      <i data-lucide="rotate-ccw"></i>
+    </button>
+    <div id="volume-group">
+      <i data-lucide="volume-2"></i>
+      <input type="range" id="volume" min="0" max="100" value="100">
+    </div>
+  </div>
 </div>
-<input type="file" id="file-input" accept=".sb3">
-<div id="status">ready</div>
+
 <script src="./scaffolding-min.js"></script>
 <script>
+  lucide.createIcons();
+
   const status = document.getElementById('status');
   const log = (msg) => { status.textContent = msg; console.log('[scratch-gpu]', msg); };
 
@@ -102,11 +252,67 @@
   s.editableLists = true;
   s.shouldConnectPeripherals = false;
   s.setup();
-  s.appendTo(document.body);
+  s.appendTo(document.getElementById('container'));
 
+  const storage = s.storage;
+  storage.addWebStore(
+    [storage.AssetType.ImageVector, storage.AssetType.ImageBitmap, storage.AssetType.Sound],
+    (asset) => `https://assets.scratch.mit.edu/internalapi/asset/${asset.assetId}.${asset.dataFormat}/get/`
+  );
+
+  s.vm.on('ASSET_PROGRESS', (finished, total) => {
+    log(`loading assets: ${finished} / ${total}`);
+  });
+
+  // Controls
+  const playPauseBtn = document.getElementById('play-pause');
+  const reloadBtn = document.getElementById('reload');
+  const volumeSlider = document.getElementById('volume');
+  const playIcon = '<i data-lucide="play"></i>';
+  const pauseIcon = '<i data-lucide="pause"></i>';
+
+  let isPlaying = false;
+
+  const setPlayIcon = (playing) => {
+    playPauseBtn.innerHTML = playing ? pauseIcon : playIcon;
+    playPauseBtn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+    lucide.createIcons();
+  };
+
+  const play = () => {
+    s.greenFlag();
+    isPlaying = true;
+    setPlayIcon(true);
+    log('playing');
+  };
+
+  const pause = () => {
+    s.stopAll();
+    isPlaying = false;
+    setPlayIcon(false);
+    log('paused');
+  };
+
+  playPauseBtn.addEventListener('click', () => {
+    if (isPlaying) pause(); else play();
+  });
+
+  reloadBtn.addEventListener('click', () => {
+    s.stopAll();
+    setTimeout(() => play(), 50);
+  });
+
+  volumeSlider.addEventListener('input', (e) => {
+    const value = parseInt(e.target.value, 10) / 100;
+    const audioEngine = s.vm && s.vm.runtime && s.vm.runtime.audioEngine;
+    if (audioEngine && audioEngine.inputNode) {
+      audioEngine.inputNode.gain.value = value;
+    }
+  });
+
+  // Drag & drop
   const drop = document.getElementById('drop');
   const fileInput = document.getElementById('file-input');
-  const picker = document.getElementById('picker');
   let loaded = false;
 
   async function handleFile (file) {
@@ -124,13 +330,11 @@
       await s.loadProject(buf);
       drop.classList.add('hidden');
       loaded = true;
-      // Release focus from the hidden file input so keyboard events reach the
-      // stage instead of being silently swallowed by the focused input.
       if (document.activeElement && document.activeElement.blur) {
         document.activeElement.blur();
       }
       log('green flag');
-      s.greenFlag();
+      play();
       if (s._shaderRenderer) s._shaderRenderer.render();
       log('rendered: ' + s._shaderCanvas.width + 'x' + s._shaderCanvas.height);
     } catch (err) {
@@ -139,8 +343,6 @@
     }
   }
 
-  // Drag handling: listen on document AND the Scaffolding's _root so
-  // we catch drops no matter which child the cursor is over.
   function onDragOver (e) {
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
@@ -159,19 +361,14 @@
   document.addEventListener('dragover', onDragOver);
   document.addEventListener('dragleave', onDragLeave);
   document.addEventListener('drop', onDrop);
-  // Also bind to the Scaffolding root in case document-level listeners
-  // are blocked by an extension or layout edge case.
   if (s._root) {
     s._root.addEventListener('dragover', onDragOver);
     s._root.addEventListener('drop', onDrop);
   }
 
-  // File-input fallback: the <label for="file-input"> triggers the native
-  // picker natively, so we only need to listen for the change event here.
   fileInput.addEventListener('change', (e) => {
     const file = e.target.files && e.target.files[0];
     handleFile(file);
-    // Reset so selecting the same file twice still fires change.
     fileInput.value = '';
   });
 
