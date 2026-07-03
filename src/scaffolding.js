@@ -7,8 +7,6 @@ import Question from './question.js';
 import defaultMessages from './messages.json';
 import ScratchShaderCompiler from './shader-compiler.js';
 import ShaderRenderer from './shader-renderer.js';
-import { ShaderCompilerWGSL } from './shader-compiler-wgsl.js';
-import WebGPURenderer from './shader-renderer-webgpu.js';
 
 /**
  * @param {MouseEvent|TouchEvent} event
@@ -73,7 +71,6 @@ class Scaffolding extends EventTarget {
     this.shaderOnTop = true;
     this.shaderEnabled = false;
     this.shaderDiagnostics = null;
-    this.shaderBackend = 'webgpu';
 
     this._monitors = new Map();
     this._mousedownPosition = null;
@@ -221,10 +218,7 @@ class Scaffolding extends EventTarget {
     if (!this._shaderRenderer) return;
     this._shaderRenderer.stop();
     if (this._shaderRenderer.clearGlErrors) this._shaderRenderer.clearGlErrors();
-    const useWebGPU = this.shaderBackend === 'webgpu';
-    const compiler = useWebGPU
-      ? new ShaderCompilerWGSL(this.vm.runtime)
-      : new ScratchShaderCompiler(this.vm.runtime);
+    const compiler = new ScratchShaderCompiler(this.vm.runtime);
     let result;
     try {
       result = compiler.compile();
@@ -253,9 +247,7 @@ class Scaffolding extends EventTarget {
       this._updateShaderStatus();
       return;
     }
-    const ok = useWebGPU
-      ? this._shaderRenderer.setProgram(result)
-      : this._shaderRenderer.setProgram(result, (name) => this._readShaderVariable(name));
+    const ok = this._shaderRenderer.setProgram(result, (name) => this._readShaderVariable(name));
     if (!ok) {
       this._shaderCanvas.style.display = 'none';
       this.shaderEnabled = false;
@@ -368,53 +360,6 @@ class Scaffolding extends EventTarget {
     const b = targetBlocks._blocks[blockId];
     if (b) b.next = originalNext;
     this._pixelBodyBackup = null;
-  }
-
-  async _initWebGPURenderer () {
-    try {
-      const renderer = new WebGPURenderer(this._shaderCanvas);
-      await renderer.init();
-      this._shaderRenderer = renderer;
-      this._startShaderErrorPolling();
-    } catch (e) {
-      console.warn('WebGPU shader renderer disabled:', e.message);
-      this._shaderRenderer = null;
-    }
-  }
-
-  async switchShaderBackend (backend) {
-    if (backend !== 'webgl' && backend !== 'webgpu') return;
-    if (backend === this.shaderBackend) return;
-    this.shaderBackend = backend;
-    if (this._shaderRenderer) {
-      this._shaderRenderer.stop();
-      if (this._shaderRenderer.destroy) this._shaderRenderer.destroy();
-      this._shaderRenderer = null;
-    }
-    this._restorePixelOnCPU();
-    this.shaderEnabled = false;
-    if (backend === 'webgpu') {
-      await this._initWebGPURenderer();
-      if (!this._shaderRenderer) {
-        console.warn('WebGPU unavailable, falling back to WebGL.');
-        this.shaderBackend = 'webgl';
-        try {
-          this._shaderRenderer = new ShaderRenderer(this._shaderCanvas);
-        } catch (e) {
-          this._shaderRenderer = null;
-        }
-      }
-    } else {
-      try {
-        this._shaderRenderer = new ShaderRenderer(this._shaderCanvas);
-      } catch (e) {
-        this._shaderRenderer = null;
-      }
-    }
-    if (this._shaderRenderer && this.vm && this.vm.runtime) {
-      this._tryEnableShader();
-    }
-    this.dispatchEvent(new CustomEvent('backendChanged', { detail: this.shaderBackend }));
   }
 
   recompileShader () {
@@ -568,8 +513,27 @@ class Scaffolding extends EventTarget {
     this.vm.postIOData('mouseWheel', data);
   }
 
+  _isTextInputTarget (target) {
+    if (!target || target === document || target === document.body) return false;
+    const tag = target.tagName;
+    if (tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) {
+      return true;
+    }
+    // Only treat <input> as a text field for actual text-entry types, so that
+    // non-text inputs (e.g. <input type="file">, checkbox, button, range) do
+    // not silently swallow keyboard input intended for the stage.
+    if (tag === 'INPUT') {
+      const type = (target.getAttribute('type') || 'text').toLowerCase();
+      return [
+        'text', 'search', 'password', 'email', 'url', 'tel', 'number',
+        'date', 'time', 'datetime-local', 'month', 'week'
+      ].includes(type);
+    }
+    return false;
+  }
+
   _onkeydown (e) {
-    if (e.target !== document && e.target !== document.body) {
+    if (this._isTextInputTarget(e.target)) {
       return;
     }
     const data = {
@@ -584,6 +548,9 @@ class Scaffolding extends EventTarget {
   }
 
   _onkeyup (e) {
+    if (this._isTextInputTarget(e.target)) {
+      return;
+    }
     const data = {
       key: e.key,
       keyCode: e.keyCode,
@@ -686,27 +653,12 @@ class Scaffolding extends EventTarget {
 
     this._placeShaderCanvas();
     this._rendererReady = Promise.resolve();
-    if (this.shaderBackend === 'webgpu') {
-      this._rendererReady = this._initWebGPURenderer().then(() => {
-        if (!this._shaderRenderer && this.shaderBackend === 'webgpu') {
-          console.warn('WebGPU unavailable, falling back to WebGL.');
-          this.shaderBackend = 'webgl';
-          try {
-            this._shaderRenderer = new ShaderRenderer(this._shaderCanvas);
-            this._startShaderErrorPolling();
-          } catch (e) {
-            this._shaderRenderer = null;
-          }
-        }
-      });
-    } else {
-      try {
-        this._shaderRenderer = new ShaderRenderer(this._shaderCanvas);
-        this._startShaderErrorPolling();
-      } catch (e) {
-        console.warn('Shader renderer disabled:', e.message);
-        this._shaderRenderer = null;
-      }
+    try {
+      this._shaderRenderer = new ShaderRenderer(this._shaderCanvas);
+      this._startShaderErrorPolling();
+    } catch (e) {
+      console.warn('Shader renderer disabled:', e.message);
+      this._shaderRenderer = null;
     }
 
     // TurboWarp-specific VM extensions
