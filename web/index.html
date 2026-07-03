@@ -271,7 +271,15 @@
   const playIcon = '<i data-lucide="play"></i>';
   const pauseIcon = '<i data-lucide="pause"></i>';
 
+  let projectLoaded = false;
   let isPlaying = false;
+
+  const frameLoop = () => s.vm && s.vm.runtime && s.vm.runtime.frameLoop;
+  const shaderRenderer = () => s._shaderRenderer;
+  const audioContext = () => {
+    const engine = s.vm && s.vm.runtime && s.vm.runtime.audioEngine;
+    return engine && engine.audioContext;
+  };
 
   const setPlayIcon = (playing) => {
     playPauseBtn.innerHTML = playing ? pauseIcon : playIcon;
@@ -279,27 +287,55 @@
     lucide.createIcons();
   };
 
-  const play = () => {
+  const startProject = () => {
     s.greenFlag();
+    isPlaying = true;
+    projectLoaded = true;
+    setPlayIcon(true);
+    log('playing');
+  };
+
+  const resume = () => {
+    const fl = frameLoop();
+    if (fl && !fl.running) fl.start();
+    const sr = shaderRenderer();
+    if (sr && !sr._running) sr.start();
+    const ac = audioContext();
+    if (ac && ac.state === 'suspended') ac.resume();
     isPlaying = true;
     setPlayIcon(true);
     log('playing');
   };
 
   const pause = () => {
-    s.stopAll();
+    const fl = frameLoop();
+    if (fl && fl.running) fl.stop();
+    const sr = shaderRenderer();
+    if (sr && sr._running) sr.stop();
+    const ac = audioContext();
+    if (ac && ac.state === 'running') ac.suspend();
     isPlaying = false;
     setPlayIcon(false);
     log('paused');
   };
 
   playPauseBtn.addEventListener('click', () => {
-    if (isPlaying) pause(); else play();
+    if (!projectLoaded) {
+      startProject();
+    } else if (isPlaying) {
+      pause();
+    } else {
+      resume();
+    }
   });
 
   reloadBtn.addEventListener('click', () => {
-    s.stopAll();
-    setTimeout(() => play(), 50);
+    pause();
+    s.greenFlag();
+    isPlaying = true;
+    projectLoaded = true;
+    setPlayIcon(true);
+    log('reloaded');
   });
 
   volumeSlider.addEventListener('input', (e) => {
@@ -334,7 +370,7 @@
         document.activeElement.blur();
       }
       log('green flag');
-      play();
+      startProject();
       if (s._shaderRenderer) s._shaderRenderer.render();
       log('rendered: ' + s._shaderCanvas.width + 'x' + s._shaderCanvas.height);
     } catch (err) {
