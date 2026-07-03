@@ -10,8 +10,8 @@
     "./with-music": "./dist/scaffolding-with-music.js"
   },
   "scripts": {
-    "build": "webpack",
-    "prepublishOnly": "cross-env NODE_ENV=production webpack"
+    "build": "webpack && cp web/index.html dist/index.html",
+    "prepublishOnly": "cross-env NODE_ENV=production webpack && cp web/index.html dist/index.html"
   },
   "repository": {
     "type": "git",
