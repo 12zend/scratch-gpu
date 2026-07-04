@@ -51,6 +51,11 @@ class ShaderRenderer {
     this._computeHeight = 0;
     this._computeColorBufferFloat = this.gl.getExtension('WEBGL_color_buffer_float');
     this._computeFloatType = (this._floatExt && this._computeColorBufferFloat) ? this.gl.FLOAT : null;
+
+    this._computeProgramCache = null;
+    this._computeProgramCacheKey = null;
+    this._computeAtlas = null;
+    this._computeAtlasCompiled = null;
   }
 
   getGlErrors () {
@@ -514,17 +519,61 @@ class ShaderRenderer {
     this._computeTexture = tex;
   }
 
+  _getComputeProgram (compiled) {
+    const key = compiled.fragmentSource;
+    if (this._computeProgramCacheKey === key && this._computeProgramCache) {
+      return this._computeProgramCache;
+    }
+    if (this._computeProgramCache) {
+      this.gl.deleteProgram(this._computeProgramCache.program);
+    }
+    const programInfo = this._compileProgram(compiled);
+    if (!programInfo) return null;
+    this._computeProgramCache = programInfo;
+    this._computeProgramCacheKey = key;
+    if (this._computeProgram) {
+      this.gl.deleteProgram(this._computeProgram);
+      this._computeProgram = null;
+    }
+    return programInfo;
+  }
+
+  _getComputeAtlas (compiled, readList) {
+    const info = this._collectPackInfo(compiled, readList);
+    if (!info) return null;
+
+    const sameCompiled = this._computeAtlasCompiled === compiled;
+    const existing = this._computeAtlas;
+    const width = Math.min(info.maxLen, MAX_TEX_SIZE);
+
+    if (sameCompiled && existing && existing.width === width) {
+      this._updateListAtlasInPlace(existing, info.packInfo, info.maxLen);
+      return existing;
+    }
+
+    if (existing) {
+      this.gl.deleteTexture(existing.texture);
+    }
+    const atlas = this._buildListAtlas(info.packInfo, info.maxLen);
+    this._computeAtlas = atlas;
+    this._computeAtlasCompiled = compiled;
+    return atlas;
+  }
+
   runComputePass (compiled, width, height, readVariable, readList) {
     const gl = this.gl;
     if (!compiled || !compiled.fragmentSource) return null;
     this._ensureComputeTarget(width, height);
-    const programInfo = this._compileProgram(compiled);
+
+    const programInfo = this._getComputeProgram(compiled);
     if (!programInfo) {
       console.error('[scaffolding-shader] Compute program failed to compile');
       return null;
     }
-    if (this._computeProgram) gl.deleteProgram(this._computeProgram);
-    this._computeProgram = programInfo.program;
+    if (this._computeProgram !== programInfo.program) {
+      if (this._computeProgram) gl.deleteProgram(this._computeProgram);
+      this._computeProgram = programInfo.program;
+    }
 
     const prevFbo = gl.getParameter(gl.FRAMEBUFFER_BINDING);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this._computeFbo);
@@ -546,7 +595,7 @@ class ShaderRenderer {
       gl.uniform1f(v.loc, val);
     }
 
-    const atlas = this._buildAtlasForCompiled(compiled, readList);
+    const atlas = this._getComputeAtlas(compiled, readList);
     const atlasLoc = programInfo.locations.listAtlas;
     if (atlas && atlasLoc) {
       gl.activeTexture(gl.TEXTURE0);
@@ -569,11 +618,6 @@ class ShaderRenderer {
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, prevFbo);
-
-    // Clean up temporary atlas texture.
-    if (atlas && atlas.texture) {
-      gl.deleteTexture(atlas.texture);
-    }
 
     this._glStateReady = false;
 
@@ -613,6 +657,16 @@ class ShaderRenderer {
     if (this._computeProgram) {
       this.gl.deleteProgram(this._computeProgram);
       this._computeProgram = null;
+    }
+    if (this._computeProgramCache) {
+      this.gl.deleteProgram(this._computeProgramCache.program);
+      this._computeProgramCache = null;
+      this._computeProgramCacheKey = null;
+    }
+    if (this._computeAtlas) {
+      this.gl.deleteTexture(this._computeAtlas.texture);
+      this._computeAtlas = null;
+      this._computeAtlasCompiled = null;
     }
     if (this._computeFbo) {
       this.gl.deleteFramebuffer(this._computeFbo);
