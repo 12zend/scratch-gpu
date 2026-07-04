@@ -155,14 +155,17 @@ export default async function ({addon, console}) {
     }
   };
 
-  const _invalidateCaches = () => {
+  const _invalidateCompiledScripts = () => {
     const targets = (vm && vm.runtime && vm.runtime.targets) || [];
     for (const target of targets) {
-      if (target && target.blocks && target.blocks.resetCache) {
-        target.blocks.resetCache();
-      }
+      const cache = target && target.blocks && target.blocks._cache;
+      if (!cache) continue;
+      cache.compiledScripts = {};
+      cache.compiledProcedures = {};
     }
   };
+
+  const _invalidateCaches = _invalidateCompiledScripts;
 
   const skipProceduresOnCPU = (proccodes) => {
     restoreProceduresOnCPU();
@@ -354,7 +357,6 @@ export default async function ({addon, console}) {
   // --- lifecycle hooks ---
   vm.runtime.on('PROJECT_LOADED', () => {
     shadersDirty = true;
-    tryEnableShader();
   });
 
   vm.runtime.on('PROJECT_CHANGED', () => {
@@ -366,6 +368,7 @@ export default async function ({addon, console}) {
       tryEnableShader();
     } else if (shaderRenderer && shaderEnabled) {
       shaderRenderer.resetTime();
+      if (kernelScheduler && !kernelScheduler.running) kernelScheduler.start();
     }
     if (shaderRenderer && shaderEnabled) {
       startShaderListRefresh();
@@ -373,7 +376,10 @@ export default async function ({addon, console}) {
   });
 
   vm.runtime.on('PROJECT_RUN_STOP', () => {
+    if (shaderRenderer) shaderRenderer.stop();
     if (kernelScheduler) kernelScheduler.stop();
+    restoreProceduresOnCPU();
+    shadersDirty = true;
   });
 
   // --- settings change handling ---
@@ -402,11 +408,11 @@ export default async function ({addon, console}) {
   });
   addon.self.addEventListener('reenabled', () => {
     if (!overlayAttached) overlayAttached = attachOverlay();
-    tryEnableShader();
+    shadersDirty = true;
   });
 
-  // initial run (project may already be loaded)
-  tryEnableShader();
+  // initial run: set dirty flag; shaders compile on first green flag
+  shadersDirty = true;
 
   // debug hook
   window._gpuShaderDebug = {
