@@ -125,6 +125,7 @@ export class GpuKernelScheduler {
     if (capped) {
       console.warn(`[gpu-kernel-scheduler] List "${entry.outputListName}" is too large; only first ${MAX_TEX_SIZE * MAX_TEX_SIZE} elements will be updated.`);
     }
+    const t0 = performance.now();
     const result = this.shaderRenderer.runComputePass(
       entry.compiled,
       width,
@@ -132,6 +133,7 @@ export class GpuKernelScheduler {
       () => this.scaffolding._buildVariableCache(),
       (name) => this.scaffolding._readShaderList(name)
     );
+    const t1 = performance.now();
     if (!result) {
       this._handleKernelFailure(entry);
       return;
@@ -144,6 +146,10 @@ export class GpuKernelScheduler {
       out[i] = result[i];
     }
     list.value = out;
+
+    if (!(entry._logCounter = (entry._logCounter || 0) + 1) % 1) {
+      console.log(`[gpu-kernel-scheduler] runKernel "${entry.label}" len=${length} ${t1 - t0 < 16 ? '<16' : t1.toFixed(1)}ms`);
+    }
   }
 
   _handleKernelFailure (entry) {

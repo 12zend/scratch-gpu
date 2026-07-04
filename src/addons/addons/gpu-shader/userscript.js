@@ -178,13 +178,11 @@ export default async function ({addon, console}) {
   const restoreProceduresOnCPU = () => {
     if (!skipSet) return;
     skipSet = null;
-    _invalidateCaches();
   };
 
   const restoreProcedureOnCPU = (proccode) => {
     if (!skipSet) return;
     skipSet.delete(proccode);
-    _invalidateCaches();
   };
 
   // --- list refresh (covers CPU init scripts that populate lists after green flag) ---
@@ -246,6 +244,7 @@ export default async function ({addon, console}) {
 
   // --- the master enable routine (ported from scaffolding._tryEnableShader) ---
   const tryEnableShader = () => {
+    const t0 = performance.now();
     if (shaderRenderer) shaderRenderer.stop();
     if (shaderRenderer && shaderRenderer.clearGlErrors) shaderRenderer.clearGlErrors();
     if (kernelScheduler) {
@@ -257,8 +256,10 @@ export default async function ({addon, console}) {
     const runtime = vm && vm.runtime;
     if (!runtime) return;
 
+    const t1 = performance.now();
     const detector = new GpuKernelDetector(runtime);
     const detection = detector.detect();
+    const t2 = performance.now();
     const screenKernel = detection.kernels.find((k) => k.type === 'screen' && k.status === 'ready');
 
     let screenCompiled = null;
@@ -327,11 +328,14 @@ export default async function ({addon, console}) {
     for (const entry of kernelScheduler.kernels) {
       proccodesToSkip.push(entry.kernel.proccode);
     }
+    const t3 = performance.now();
     skipProceduresOnCPU(proccodesToSkip);
+    const t4 = performance.now();
 
     shaderEnabled = true;
     shadersDirty = false;
-    console.log('[gpu-shader] Enabled. Screen:', screenEnabled, 'Compute kernels:', kernelScheduler.kernels.length);
+    console.log('[gpu-shader] Enabled. Screen:', screenEnabled, 'Compute kernels:', kernelScheduler.kernels.length,
+      `| detect:${(t2-t1).toFixed(0)}ms compile+schedule:${(t3-t2).toFixed(0)}ms skip:${(t4-t3).toFixed(0)}ms total:${(t4-t0).toFixed(0)}ms`);
   };
 
   const disableShader = () => {
@@ -379,6 +383,8 @@ export default async function ({addon, console}) {
   vm.runtime.on('PROJECT_RUN_STOP', () => {
     if (shaderRenderer) shaderRenderer.stop();
     if (kernelScheduler) kernelScheduler.stop();
+    restoreProceduresOnCPU();
+    shadersDirty = true;
   });
 
   // --- settings change handling ---
