@@ -1,207 +1,299 @@
-# Scaffolding (alpha)
+scratch-gui modified for use in [TurboWarp](https://turbowarp.org/)
 
-Scaffolding is a minimal Scratch project runner. It was began as part of the [TurboWarp Packager](https://packager.turbowarp.org/) (and is still used by it). Usage in other applications was historically an afterthought, but we're trying to improve that and making it a separate library is a necessary step.
+## Setup
 
-What scaffolding does for you:
+See https://docs.turbowarp.org/development/getting-started to setup the complete TurboWarp environment.
 
- - Pre-builds all the packages needed to run Scratch projects into one package and connects them all together in the right way.
- - Implements user input like mouse input including sprite dragging and keyboard input.
- - Implements highly performant variable monitors and list monitors (the boxes that appear over the stage).
- - Implements the "ask and wait" block.
- - Implements the video sensing extension.
- - Provides cloud variable implementations using WebSockets or local storage.
- - Closely emulates the style of vanilla Scratch.
-
-What scaffolding does not do for you:
-
- - Downloading projects. You have to fetch it yourself, though we have some code below you can copy and paste for common cases.
- - The rest of the interface, like the control bar or green flag overlay. We have some APIs that can help, but you have to make the actual buttons yourself.
- - Provide a project editor. Scaffolding just runs projects. Removing features only used by the editor is one way we make scaffolding smaller and faster.
-
-## Usage
-
-Scaffolding is available in two variants. The only difference is how they handle the music extension:
-
- - `scaffolding-min` (2.2MB) is the default variant. When the music extension is used, the sounds will be downloaded from `https://packagerdata.turbowarp.org/`. This variant is 2MB smaller, but the music extension won't work offline or if the network blocks turbowarp.org.
- - `scaffolding-with-music` (4.3MB) includes all the sounds as data: URLs inside the JavaScript, so the music extension will always work, even without an internet connection.
-
-Having multiple versions or variants of scaffolding on the same page probably won't work, don't try.
-
-### Installation
-
-Each variant of scaffolding is distributed as a single pre-built pre-compressed JavaScript bundle; you just need to load that bundle somehow. There's a bunch of ways to do this, sorted roughly in order of difficulty.
-
-#### &lt;script&gt; tag
-
-Replace `0.0.0` with the latest version number from https://github.com/TurboWarp/scaffolding/releases. You should use **exact** version numbers instead of things like "1" or "latest". We use [jsDelivr](https://www.jsdelivr.com/) in the examples for simplicity, but you can also download the JS file to your own server if you prefer having full control.
-
-```html
-<!-- Do ONE of these: -->
-<script src="https://cdn.jsdelivr.net/npm/@turbowarp/scaffolding@0.0.0/dist/scaffolding-min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@turbowarp/scaffolding@0.0.0/dist/scaffolding-with-music.js"></script>
-
-<script>
-    // Then scaffolding is exported as a global variable
-    const scaffolding = new Scaffolding.Scaffolding();
-</script>
-```
-
-#### Native ESM import
-
-Scaffolding does not have a build that use native ESM syntax. However, you can still use either static or dynamic import, it will just be accessible from a global variable instead of from the import.
-
-```html
-<script type="module">
-    // Do ONE of these:
-    import "https://cdn.jsdelivr.net/npm/@turbowarp/scaffolding@0.0.0/dist/scaffolding-min.js";
-    import "https://cdn.jsdelivr.net/npm/@turbowarp/scaffolding@0.0.0/dist/scaffolding-with-music.js";
-    await import("https://cdn.jsdelivr.net/npm/@turbowarp/scaffolding@0.0.0/dist/scaffolding-min.js");
-    await import("https://cdn.jsdelivr.net/npm/@turbowarp/scaffolding@0.0.0/dist/scaffolding-with-music.js");
-
-    // Then scaffolding is exported as a global variable
-    const scaffolding = new Scaffolding.Scaffolding();
-</script>
-```
-
-#### npm with a build tool
-
-If you use a build tool like webpack, you can install scaffolding from npm and then import as any other library:
-
-```bash
-npm install --save-exact @turbowarp/scaffolding
-```
-
-Then scaffolding can be imported by doing any **one** of these:
-
-```js
-// Do ONE of these or the import statements below:
-const Scaffolding = require('@turbowarp/scaffolding');
-const Scaffolding = require('@turbowarp/scaffolding/with-music');
-```
-
-webpack in particular will let you use the nicer ESM syntax even though it is actually a CJS module, so you can do these instead:
-
-```js
-// Do ONE of these or the require() statements above:
-import * as Scaffolding from '@turbowarp/scaffolding';
-import * as Scaffolding from '@turbowarp/scaffolding/with-music';
-const Scaffolding = await import('@turbowarp/scaffolding');
-const Scaffolding = await import('@turbowarp/scaffolding/with-music');
-
-// DO NOT do one of these, it WILL NOT work:
-import Scaffolding from '@turbowarp/scaffolding';
-import Scaffolding from '@turbowarp/scaffolding/with-music';
-```
-
-then you can use the import as normal:
-
-```js
-const scaffolding = new Scaffolding.Scaffolding();
-```
-
-### Configuring it
-
-We'll assume you've followed the above steps and now have a scaffolding instance named `scaffolding`.
-
-There are a few settings that can't be changed later. The full list and their default value are below, so modify any of these first if you want to change them:
-
-```js
-scaffolding.width = 480;
-scaffolding.height = 360;
-scaffolding.resizeMode = 'preserve-ratio'; // or 'dynamic-resize' or 'stretch'
-scaffolding.editableLists = false;
-scaffolding.shouldConnectPeripherals = true;
-scaffolding.usePackagedRuntime = false;
-scaffolding.framerate = 60; // defaults to 30 (Scratch compatibility mode)
-```
-
-Then tell scaffolding to initialize the runtime:
-
-```js
-scaffolding.setup();
-```
-
-Then put scaffolding's root element into the DOM somewhere using `scaffolding.appendTo(element)`. Scaffolding uses `width: 100%; height: 100%;`, so use CSS to control the size of the element you append scaffolding into. For example this will make a fixed 480x360 stage:
-
-```html
-<style>
-    #project {
-        width: 480px;
-        height: 360px;
-    }
-</style>
-<div id="project"></div>
-```
-
-```js
-scaffolding.appendTo(document.getElementById('project'));
-```
-
-Scaffolding will automatically resize when the window is resized. If you have another button that can cause the element to be resized, run `scaffolding.relayout()` to ensure it updates.
-
-### Loading a project
-
-If you intend to load projects from Scratch or loose project.json files, you'll have to tell scratch-storage where to download assets from. This will tell it to use the scratch.mit.edu assets server:
-
-```js
-const storage = scaffolding.storage;
-storage.addWebStore(
-  [storage.AssetType.ImageVector, storage.AssetType.ImageBitmap, storage.AssetType.Sound],
-  (asset) => `https://assets.scratch.mit.edu/internalapi/asset/${asset.assetId}.${asset.dataFormat}/get/`
-);
-```
-
-You can supply scaffolding with a project.json file or a full sb, sb2, or sb3 file as an ArrayBuffer or Uint8Array and then feed it into `scaffolding.loadProject`. However you go about acquiring those is up to you; you can ask the user to enter one into an input or fetch it from your own server. If you want to load projects from Scratch, we suggest the following as a starting point.
-
-```js
-// See https://docs.turbowarp.org/unshared-projects#developers
-const getProjectMetadata = async (projectId) => {
-    const response = await fetch(`https://trampoline.turbowarp.org/api/projects/${projectId}`);
-    if (response.status === 404) {
-        throw new Error('The project is unshared or does not exist');
-    }
-    if (!response.ok) {
-        throw new Error(`HTTP error ${response.status} fetching project metadata`);
-    }
-    const json = await response.json();
-    return json;
-};
-const getProjectData = async (projectId) => {
-    const metadata = await getProjectMetadata(projectId);
-    const token = metadata.project_token;
-    const response = await fetch(`https://projects.scratch.mit.edu/${projectId}?token=${token}`);
-    if (!response.ok) {
-        throw new Error(`HTTP error ${response.status} fetching project data`);
-    }
-    const data = await response.arrayBuffer();
-    return data;
-};
-
-const loadProject = (projectId) => {
-    const project = await getProjectData(projectId);
-    await scaffolding.loadProject(project);
-};
-loadProject('60917032');
-```
-
-Loading projects takes a while, so this returns a Promise that resolves when the project loads. Once it loads, you can start the project with:
-
-```js
-scaffolding.greenFlag();
-```
-
-### Content-Security-Policy considerations
-
-Meaningfully sandboxing scaffolding with Content-Security-Policy is hard. It needs to be able to fetch things from `data:` and `blob:` URLs, and the TurboWarp compiler, enabled by default, requires `unsafe-eval`.
-
-## Development
-
-```bash
-git clone https://github.com/TurboWarp/scaffolding.git
-cd scaffolding
-npm run build
-```
+If you just want to play with the GUI then it's the same process as upstream scratch-gui.
 
 ## License
 
-This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+TurboWarp's modifications to Scratch are licensed under the GNU General Public License v3.0. See LICENSE or https://www.gnu.org/licenses/ for details.
+
+The following is the original license for scratch-gui, which we are required to retain. This is NOT the license of this project.
+
+```
+Copyright (c) 2016, Massachusetts Institute of Technology
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+src/lib/default-project/dango.svg is based on [Twemoji](https://twemoji.twitter.com/) and is licensed under CC BY 4.0 https://creativecommons.org/licenses/by/4.0/
+
+<!--
+
+# scratch-gui
+#### Scratch GUI is a set of React components that comprise the interface for creating and running Scratch 3.0 projects
+
+## Installation
+This requires you to have Git and Node.js installed.
+
+In your own node environment/application:
+```bash
+npm install https://github.com/LLK/scratch-gui.git
+```
+If you want to edit/play yourself:
+```bash
+git clone https://github.com/LLK/scratch-gui.git
+cd scratch-gui
+npm install
+```
+
+**You may want to add `--depth=1` to the `git clone` command because there are some [large files in the git repository history](https://github.com/LLK/scratch-gui/issues/5140).**
+
+## Getting started
+Running the project requires Node.js to be installed.
+
+## Running
+Open a Command Prompt or Terminal in the repository and run:
+```bash
+npm start
+```
+Then go to [http://localhost:8601/](http://localhost:8601/) - the playground outputs the default GUI component
+
+## Developing alongside other Scratch repositories
+
+### Getting another repo to point to this code
+
+
+If you wish to develop `scratch-gui` alongside other scratch repositories that depend on it, you may wish
+to have the other repositories use your local `scratch-gui` build instead of fetching the current production
+version of the scratch-gui that is found by default using `npm install`.
+
+Here's how to link your local `scratch-gui` code to another project's `node_modules/scratch-gui`.
+
+#### Configuration
+
+1. In your local `scratch-gui` repository's top level:
+    1. Make sure you have run `npm install`
+    2. Build the `dist` directory by running `BUILD_MODE=dist npm run build`
+    3. Establish a link to this repository by running `npm link`
+
+2. From the top level of each repository (such as `scratch-www`) that depends on `scratch-gui`:
+    1. Make sure you have run `npm install`
+    2. Run `npm link scratch-gui`
+    3. Build or run the repository
+
+#### Using `npm run watch`
+
+Instead of `BUILD_MODE=dist npm run build`, you can use `BUILD_MODE=dist npm run watch` instead. This will watch for changes to your `scratch-gui` code, and automatically rebuild when there are changes. Sometimes this has been unreliable; if you are having problems, try going back to `BUILD_MODE=dist npm run build` until you resolve them.
+
+#### Oh no! It didn't work!
+
+If you can't get linking to work right, try:
+* Follow the recipe above step by step and don't change the order. It is especially important to run `npm install` _before_ `npm link` as installing after the linking will reset the linking.
+* Make sure the repositories are siblings on your machine's file tree, like `.../.../MY_SCRATCH_DEV_DIRECTORY/scratch-gui/` and `.../.../MY_SCRATCH_DEV_DIRECTORY/scratch-www/`.
+* Consistent node.js version: If you have multiple Terminal tabs or windows open for the different Scratch repositories, make sure to use the same node version in all of them.
+* If nothing else works, unlink the repositories by running `npm unlink` in both, and start over.
+
+## Testing
+### Documentation
+
+You may want to review the documentation for [Jest](https://facebook.github.io/jest/docs/en/api.html) and [Enzyme](http://airbnb.io/enzyme/docs/api/) as you write your tests.
+
+See [jest cli docs](https://facebook.github.io/jest/docs/en/cli.html#content) for more options.
+
+### Running tests
+
+*NOTE: If you're a Windows user, please run these scripts in Windows `cmd.exe`  instead of Git Bash/MINGW64.*
+
+Before running any tests, make sure you have run `npm install` from this (scratch-gui) repository's top level.
+
+#### Main testing command
+
+To run linter, unit tests, build, and integration tests, all at once:
+```bash
+npm test
+```
+
+#### Running unit tests
+
+To run unit tests in isolation:
+```bash
+npm run test:unit
+```
+
+To run unit tests in watch mode (watches for code changes and continuously runs tests):
+```bash
+npm run test:unit -- --watch
+```
+
+You can run a single file of integration tests (in this example, the `button` tests):
+
+```bash
+$(npm bin)/jest --runInBand test/unit/components/button.test.jsx
+```
+
+#### Running integration tests
+
+Integration tests use a headless browser to manipulate the actual HTML and javascript that the repo
+produces. You will not see this activity (though you can hear it when sounds are played!).
+
+Note that integration tests require you to first create a build that can be loaded in a browser:
+
+```bash
+npm run build
+```
+
+Then, you can run all integration tests:
+
+```bash
+npm run test:integration
+```
+
+Or, you can run a single file of integration tests (in this example, the `backpack` tests):
+
+```bash
+$(npm bin)/jest --runInBand test/integration/backpack.test.js
+```
+
+If you want to watch the browser as it runs the test, rather than running headless, use:
+
+```bash
+USE_HEADLESS=no $(npm bin)/jest --runInBand test/integration/backpack.test.js
+```
+
+_Note: If you are seeing failed tests related to `chromedriver` being incompatible with your version of Chrome, you may need to update `chromedriver` with:_
+
+```bash
+npm install chromedriver@{version}
+```
+
+## Troubleshooting
+
+### Ignoring optional dependencies
+
+When running `npm install`, you can get warnings about optional dependencies:
+
+```
+npm WARN optional Skipping failed optional dependency /chokidar/fsevents:
+npm WARN notsup Not compatible with your operating system or architecture: fsevents@1.2.7
+```
+
+You can suppress them by adding the `no-optional` switch:
+
+```
+npm install --no-optional
+```
+
+Further reading: [Stack Overflow](https://stackoverflow.com/questions/36725181/not-compatible-with-your-operating-system-or-architecture-fsevents1-0-11)
+
+### Resolving dependencies
+
+When installing for the first time, you can get warnings that need to be resolved:
+
+```
+npm WARN eslint-config-scratch@5.0.0 requires a peer of babel-eslint@^8.0.1 but none was installed.
+npm WARN eslint-config-scratch@5.0.0 requires a peer of eslint@^4.0 but none was installed.
+npm WARN scratch-paint@0.2.0-prerelease.20190318170811 requires a peer of react-intl-redux@^0.7 but none was installed.
+npm WARN scratch-paint@0.2.0-prerelease.20190318170811 requires a peer of react-responsive@^4 but none was installed.
+```
+
+You can check which versions are available:
+
+```
+npm view react-intl-redux@0.* version
+```
+
+You will need to install the required version:
+
+```
+npm install  --no-optional --save-dev react-intl-redux@^0.7
+```
+
+The dependency itself might have more missing dependencies, which will show up like this:
+
+```
+user@machine:~/sources/scratch/scratch-gui (491-translatable-library-objects)$ npm install  --no-optional --save-dev react-intl-redux@^0.7
+scratch-gui@0.1.0 /media/cuideigin/Linux/sources/scratch/scratch-gui
+├── react-intl-redux@0.7.0
+└── UNMET PEER DEPENDENCY react-responsive@5.0.0
+```
+
+You will need to install those as well:
+
+```
+npm install  --no-optional --save-dev react-responsive@^5.0.0
+```
+
+Further reading: [Stack Overflow](https://stackoverflow.com/questions/46602286/npm-requires-a-peer-of-but-all-peers-are-in-package-json-and-node-modules)
+
+## Troubleshooting
+
+If you run into npm install errors, try these steps:
+1. run `npm cache clean --force`
+2. Delete the node_modules directory
+3. Delete package-lock.json
+4. run `npm install` again
+
+## Publishing to GitHub Pages
+You can publish the GUI to github.io so that others on the Internet can view it.
+[Read the wiki for a step-by-step guide.](https://github.com/LLK/scratch-gui/wiki/Publishing-to-GitHub-Pages)
+
+## Understanding the project state machine
+
+Since so much code throughout scratch-gui depends on the state of the project, which goes through many different phases of loading, displaying and saving, we created a "finite state machine" to make it clear which state it is in at any moment. This is contained in the file src/reducers/project-state.js .
+
+It can be hard to understand the code in src/reducers/project-state.js . There are several types of data and functions used, which relate to each other:
+
+### Loading states
+
+These include state constant strings like:
+
+* `NOT_LOADED` (the default state),
+* `ERROR`,
+* `FETCHING_WITH_ID`,
+* `LOADING_VM_WITH_ID`,
+* `REMIXING`,
+* `SHOWING_WITH_ID`,
+* `SHOWING_WITHOUT_ID`,
+* etc.
+
+### Transitions
+
+These are names for the action which causes a state change. Some examples are:
+
+* `START_FETCHING_NEW`,
+* `DONE_FETCHING_WITH_ID`,
+* `DONE_LOADING_VM_WITH_ID`,
+* `SET_PROJECT_ID`,
+* `START_AUTO_UPDATING`,
+
+### How transitions relate to loading states
+
+Like this diagram of the project state machine shows, various transition actions can move us from one loading state to another:
+
+![Project state diagram](docs/project_state_diagram.svg)
+
+_Note: for clarity, the diagram above excludes states and transitions relating to error handling._
+
+#### Example
+
+Here's an example of how states transition.
+
+Suppose a user clicks on a project, and the page starts to load with URL https://scratch.mit.edu/projects/123456 .
+
+Here's what will happen in the project state machine:
+
+![Project state example](docs/project_state_example.png)
+
+1. When the app first mounts, the project state is `NOT_LOADED`.
+2. The `SET_PROJECT_ID` redux action is dispatched (from src/lib/project-fetcher-hoc.jsx), with `projectId` set to `123456`. This transitions the state from `NOT_LOADED` to `FETCHING_WITH_ID`.
+3. The `FETCHING_WITH_ID` state. In src/lib/project-fetcher-hoc.jsx, the `projectId` value `123456` is used to request the data for that project from the server.
+4. When the server responds with the data, src/lib/project-fetcher-hoc.jsx dispatches the `DONE_FETCHING_WITH_ID` action, with `projectData` set. This transitions the state from `FETCHING_WITH_ID` to `LOADING_VM_WITH_ID`.
+5. The `LOADING_VM_WITH_ID` state. In src/lib/vm-manager-hoc.jsx, we load the `projectData` into Scratch's virtual machine ("the vm").
+6. When loading is done, src/lib/vm-manager-hoc.jsx dispatches the `DONE_LOADING_VM_WITH_ID` action. This transitions the state from `LOADING_VM_WITH_ID` to `SHOWING_WITH_ID`
+7. The `SHOWING_WITH_ID` state. Now the project appears normally and is playable and editable.
+
+## Donate
+We provide [Scratch](https://scratch.mit.edu) free of charge, and want to keep it that way! Please consider making a [donation](https://www.scratchfoundation.org/donate) to support our continued engineering, design, community, and resource development efforts. Donations of any size are appreciated. Thank you!
+-->

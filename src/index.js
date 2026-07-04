@@ -1,20 +1,31 @@
-import Scaffolding from './scaffolding.js';
-import * as CloudVariables from './cloud-variables.js';
-import Packages from './packages.js';
-import cssText from '!raw-loader!./style.css';
+import GUI from './containers/gui.jsx';
+import AppStateHOC from './lib/app-state-hoc.jsx';
+import GuiReducer, {guiInitialState, guiMiddleware, initEmbedded, initFullScreen, initPlayer} from './reducers/gui';
+import LocalesReducer, {localesInitialState, initLocale} from './reducers/locales';
+import {ScratchPaintReducer} from 'scratch-paint';
+import {setFullScreen, setPlayer} from './reducers/mode';
+import {remixProject} from './reducers/project-state';
+import {setAppElement} from 'react-modal';
 
-if (process.env.NODE_ENV !== 'production') {
-  console.warn('This is development build not for use in production. Use `npm run prepublishOnly` for improved file size and performance (This message will go away).');
-}
-
-const styleElement = document.createElement('style');
-styleElement.id = 'sc-styles';
-styleElement.textContent = cssText;
-const styleContainer = document.head || document.body || document.documentElement;
-styleContainer.appendChild(styleElement);
+const guiReducers = {
+    locales: LocalesReducer,
+    scratchGui: GuiReducer,
+    scratchPaint: ScratchPaintReducer
+};
 
 export {
-  Scaffolding,
-  CloudVariables,
-  Packages,
+    GUI as default,
+    AppStateHOC,
+    setAppElement,
+    guiReducers,
+    guiInitialState,
+    guiMiddleware,
+    initEmbedded,
+    initPlayer,
+    initFullScreen,
+    initLocale,
+    localesInitialState,
+    remixProject,
+    setFullScreen,
+    setPlayer
 };
