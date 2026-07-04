@@ -545,7 +545,18 @@ export class GpuKernelDetector {
 
   _synthesizePixelFromRender (procedures) {
     const existingProccodes = new Set(procedures.map(p => p.proccode));
-    if (existingProccodes.has('pixel %s %s')) return null;
+    // 'pixel %s %s' may already exist either because the user defined it OR
+    // because we synthesized and injected it on a previous detect() pass. The
+    // injected block persists in the target's block tree across stop/restart
+    // cycles (the tree is only replaced on a full PROJECT_LOADED), so on a
+    // green-flag-after-stop we will re-enter detect() with our own synthetic
+    // pixel already present. We must NOT bail out early in that case: we still
+    // need to (re)discover the render pattern and return the
+    // { renderProccode } mapping so the host render routine gets skipped on the
+    // CPU. Otherwise the CPU keeps running the 480x360 double loop calling the
+    // helper, which drops frame rate from ~200 to ~5 FPS. We only synthesize
+    // fresh pixel blocks when no 'pixel %s %s' exists yet.
+    const pixelExists = existingProccodes.has('pixel %s %s');
 
     for (const info of procedures) {
       let pattern = this._findRenderPattern(info.bodyHead, info.blocks);
@@ -555,17 +566,22 @@ export class GpuKernelDetector {
       if (!pattern) continue;
 
       const { helperProccode, colorExprId } = pattern;
-      try {
-        const blocks = this._buildPixelBlocks(helperProccode, colorExprId, info.blocks);
-        Object.assign(info.blocks._blocks, blocks);
-        return {
-          helperProccode,
-          renderProccode: info.proccode,
-          reason: pattern.reason || `Synthesized pixel(x,y) from render routine calling ${helperProccode}`
-        };
-      } catch (e) {
-        this.warnings.push(`Failed to synthesize pixel from ${info.proccode}: ${e && e.message}`);
+      if (!pixelExists) {
+        try {
+          const blocks = this._buildPixelBlocks(helperProccode, colorExprId, info.blocks);
+          Object.assign(info.blocks._blocks, blocks);
+        } catch (e) {
+          this.warnings.push(`Failed to synthesize pixel from ${info.proccode}: ${e && e.message}`);
+          continue;
+        }
       }
+      return {
+        helperProccode,
+        renderProccode: info.proccode,
+        reason: pattern.reason || (pixelExists
+          ? `Reusing existing pixel(x,y) for render routine calling ${helperProccode}`
+          : `Synthesized pixel(x,y) from render routine calling ${helperProccode}`)
+      };
     }
     return null;
   }
