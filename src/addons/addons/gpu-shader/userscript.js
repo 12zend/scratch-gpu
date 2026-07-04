@@ -368,6 +368,7 @@ export default async function ({addon, console}) {
       tryEnableShader();
     } else if (shaderRenderer && shaderEnabled) {
       shaderRenderer.resetTime();
+      shaderRenderer.start();
       if (kernelScheduler && !kernelScheduler.running) kernelScheduler.start();
     }
     if (shaderRenderer && shaderEnabled) {
@@ -378,8 +379,6 @@ export default async function ({addon, console}) {
   vm.runtime.on('PROJECT_RUN_STOP', () => {
     if (shaderRenderer) shaderRenderer.stop();
     if (kernelScheduler) kernelScheduler.stop();
-    restoreProceduresOnCPU();
-    shadersDirty = true;
   });
 
   // --- settings change handling ---
