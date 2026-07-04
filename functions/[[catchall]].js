@@ -4,12 +4,18 @@ export async function onRequest(context) {
     const path = url.pathname;
 
     const fetchAsset = async (target) => {
-        const resp = await env.ASSETS.fetch(new Request(new URL(target, url.origin), request));
-        if (resp.status >= 300 && resp.status < 400) {
+        const reqInit = {
+            method: request.method,
+            headers: request.headers
+        };
+        let resp = await env.ASSETS.fetch(new Request(new URL(target, url.origin), reqInit));
+        let hops = 0;
+        while (resp.status >= 300 && resp.status < 400 && hops < 5) {
             const loc = resp.headers.get('location');
-            if (loc) {
-                return env.ASSETS.fetch(new Request(new URL(loc, url.origin)));
-            }
+            if (!loc) break;
+            hops++;
+            const target2 = loc.startsWith('/') ? loc : new URL(loc, url.origin).pathname;
+            resp = await env.ASSETS.fetch(new Request(new URL(target2, url.origin), reqInit));
         }
         return resp;
     };
