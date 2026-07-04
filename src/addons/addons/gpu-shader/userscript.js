@@ -328,6 +328,61 @@ export default async function ({addon, console}) {
     for (const entry of kernelScheduler.kernels) {
       proccodesToSkip.push(entry.kernel.proccode);
     }
+
+    // Find procedures that directly call any skipped kernel proccode and add
+    // them to the skip set too, so the CPU doesn't waste time running a tight
+    // loop that calls a now-NOP'd kernel hundreds of thousands of times per
+    // frame (e.g. a "render" procedure that loops over all pixels calling the
+    // GPUized "pixel(x,y)"). Without this, the interpreter/compiled code still
+    // enters the loop body and dispatches the NOP'd call, which is
+    // surprisingly expensive at 480x360 = 172800 iterations per frame.
+    if (proccodesToSkip.length) {
+      const kernelSet = new Set(proccodesToSkip);
+      const allTargets = (runtime && runtime.targets) || [];
+      for (const tg of allTargets) {
+        if (!tg || !tg.blocks || !tg.blocks._blocks) continue;
+        for (const id in tg.blocks._blocks) {
+          const b = tg.blocks._blocks[id];
+          if (b.opcode !== 'procedures_definition') continue;
+          const protoId = b.inputs && b.inputs.custom_block && b.inputs.custom_block.block;
+          const proto = protoId && tg.blocks._blocks[protoId];
+          if (!proto || !proto.mutation || !proto.mutation.proccode) continue;
+          const procProccode = proto.mutation.proccode;
+          if (proccodesToSkip.includes(procProccode)) continue; // already skipped
+          // Walk the body to see if it calls any kernel proccode
+          let bodyId = b.next;
+          let callsKernel = false;
+          const visited = new Set();
+          while (bodyId && !callsKernel) {
+            if (visited.has(bodyId)) break;
+            visited.add(bodyId);
+            const stmt = tg.blocks._blocks[bodyId];
+            if (!stmt) break;
+            // Check SUBSTACK too
+            const stackIds = [bodyId];
+            while (stackIds.length && !callsKernel) {
+              const sid = stackIds.pop();
+              const sb = tg.blocks._blocks[sid];
+              if (!sb) continue;
+              if (sb.opcode === 'procedures_call' && sb.mutation && kernelSet.has(sb.mutation.proccode)) {
+                callsKernel = true;
+                break;
+              }
+              for (const key in sb.inputs) {
+                const childId = sb.inputs[key].block || sb.inputs[key].shadow;
+                if (childId) stackIds.push(childId);
+              }
+              if (sb.opcode !== 'procedures_call' && sb.next) stackIds.push(sb.next);
+            }
+            bodyId = stmt.next;
+          }
+          if (callsKernel && !proccodesToSkip.includes(procProccode)) {
+            proccodesToSkip.push(procProccode);
+          }
+        }
+      }
+    }
+
     const t3 = performance.now();
     skipProceduresOnCPU(proccodesToSkip);
     const t4 = performance.now();
