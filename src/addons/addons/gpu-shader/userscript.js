@@ -54,8 +54,6 @@ export default async function ({addon, console}) {
   let shaderRenderer = null;
   let kernelScheduler = null;
   let shaderEnabled = false;
-  let procedureBackups = null;
-  let procedureBackupMap = null;
   let listDataCache = null;
   let shaderListRefreshTimer = null;
 
@@ -129,48 +127,60 @@ export default async function ({addon, console}) {
   };
 
   // --- CPU procedure skip / restore ---
-  const skipProceduresOnCPU = (proccodes) => {
-    restoreProceduresOnCPU();
-    if (!proccodes || !proccodes.length) return;
-    const set = new Set(proccodes);
+  // Instead of mutating the block tree (b.next = null) which disconnects
+  // procedure bodies in the editor, we override getProcedureDefinition on
+  // each target's Blocks instance so that skipped proccodes resolve to null.
+  // Both the interpreter (sequencer.stepToProcedure) and the compiler
+  // (irgen.js getProcedureInfo) treat a null definition as "procedure not
+  // found" and become no-ops, while the editor's block tree stays intact.
+  let skipSet = null;
+  const patchedTargets = new Set();
+
+  const _patchBlocks = (blocks) => {
+    if (!blocks || patchedTargets.has(blocks)) return;
+    patchedTargets.add(blocks);
+    const original = blocks.getProcedureDefinition.bind(blocks);
+    blocks._gpuShaderOriginalGetProcedureDefinition = original;
+    blocks.getProcedureDefinition = (name) => {
+      if (skipSet && skipSet.has(name)) return null;
+      return original(name);
+    };
+  };
+
+  const _patchAllTargets = () => {
     const targets = (vm && vm.runtime && vm.runtime.targets) || [];
-    procedureBackups = [];
-    procedureBackupMap = new Map();
     for (const target of targets) {
-      if (!target || !target.blocks || !target.blocks._blocks) continue;
-      for (const id in target.blocks._blocks) {
-        const b = target.blocks._blocks[id];
-        if (b.opcode !== 'procedures_definition') continue;
-        const protoId = b.inputs && b.inputs.custom_block && b.inputs.custom_block.block;
-        const proto = protoId && target.blocks._blocks[protoId];
-        if (!proto || !proto.mutation || !set.has(proto.mutation.proccode)) continue;
-        const backup = { blockId: id, originalNext: b.next, targetBlocks: target.blocks, proccode: proto.mutation.proccode };
-        procedureBackups.push(backup);
-        procedureBackupMap.set(proto.mutation.proccode, backup);
-        b.next = null;
+      if (target && target.blocks) _patchBlocks(target.blocks);
+    }
+  };
+
+  const _invalidateCaches = () => {
+    const targets = (vm && vm.runtime && vm.runtime.targets) || [];
+    for (const target of targets) {
+      if (target && target.blocks && target.blocks.resetCache) {
+        target.blocks.resetCache();
       }
     }
   };
 
+  const skipProceduresOnCPU = (proccodes) => {
+    restoreProceduresOnCPU();
+    if (!proccodes || !proccodes.length) return;
+    skipSet = new Set(proccodes);
+    _patchAllTargets();
+    _invalidateCaches();
+  };
+
   const restoreProceduresOnCPU = () => {
-    if (!procedureBackups) return;
-    for (const backup of procedureBackups) {
-      const b = backup.targetBlocks._blocks[backup.blockId];
-      if (b) b.next = backup.originalNext;
-    }
-    procedureBackups = null;
-    procedureBackupMap = null;
+    if (!skipSet) return;
+    skipSet = null;
+    _invalidateCaches();
   };
 
   const restoreProcedureOnCPU = (proccode) => {
-    if (!procedureBackupMap) return;
-    const backup = procedureBackupMap.get(proccode);
-    if (!backup) return;
-    const b = backup.targetBlocks._blocks[backup.blockId];
-    if (b) b.next = backup.originalNext;
-    procedureBackupMap.delete(proccode);
-    const idx = procedureBackups.indexOf(backup);
-    if (idx >= 0) procedureBackups.splice(idx, 1);
+    if (!skipSet) return;
+    skipSet.delete(proccode);
+    _invalidateCaches();
   };
 
   // --- list refresh (covers CPU init scripts that populate lists after green flag) ---
