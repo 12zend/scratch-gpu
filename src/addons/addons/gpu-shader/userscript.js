@@ -442,6 +442,44 @@ export default async function ({addon, console}) {
     shadersDirty = true;
   });
 
+  // --- pause/resume hooks (Scratch Addons "pause" addon emits these) ---
+  // Both ShaderRenderer and GpuKernelScheduler run their own
+  // requestAnimationFrame loops independent of the VM clock. When the user
+  // pauses the project (via the pause button / alt+x), the VM freezes its
+  // threads and audio, but without these hooks the GPU RAF loops keep
+  // advancing: the screen shader keeps animating (its time uniform uses
+  // performance.now()) and compute kernels keep overwriting their output
+  // lists every frame -- which also races the CPU threads that are
+  // supposed to be paused. Stop both RAF loops on pause, resume on unpause,
+  // and use pauseTime/resumeTime so the shader's u_time does not jump
+  // forward by the pause duration when resumed.
+  let _wasRenderingBeforePause = false;
+  let _wasSchedulerRunningBeforePause = false;
+
+  vm.runtime.on('RUNTIME_PAUSED', () => {
+    _wasRenderingBeforePause = !!(shaderRenderer && shaderRenderer._running);
+    _wasSchedulerRunningBeforePause = !!(kernelScheduler && kernelScheduler.running);
+    if (shaderRenderer && _wasRenderingBeforePause) {
+      shaderRenderer.pauseTime();
+      shaderRenderer.stop();
+    }
+    if (kernelScheduler && _wasSchedulerRunningBeforePause) {
+      kernelScheduler.stop();
+    }
+  });
+
+  vm.runtime.on('RUNTIME_UNPAUSED', () => {
+    if (shaderRenderer && _wasRenderingBeforePause && shaderEnabled) {
+      shaderRenderer.resumeTime();
+      if (!shaderRenderer._running) shaderRenderer.start();
+    }
+    if (kernelScheduler && _wasSchedulerRunningBeforePause && shaderEnabled && !kernelScheduler.running) {
+      kernelScheduler.start();
+    }
+    _wasRenderingBeforePause = false;
+    _wasSchedulerRunningBeforePause = false;
+  });
+
   // --- settings change handling ---
   addon.settings.addEventListener('change', () => {
     const newScale = readScale();
