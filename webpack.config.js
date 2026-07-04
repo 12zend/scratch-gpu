@@ -185,7 +185,7 @@ module.exports = [
             new HtmlWebpackPlugin({
                 chunks: ['editor'],
                 template: 'src/playground/index.ejs',
-                filename: 'editor.html',
+                filename: 'editor-page.html',
                 title: `${APP_NAME} - Run Scratch projects faster`,
                 isEditor: true,
                 ...htmlWebpackPluginCommon
@@ -200,28 +200,28 @@ module.exports = [
             new HtmlWebpackPlugin({
                 chunks: ['fullscreen'],
                 template: 'src/playground/index.ejs',
-                filename: 'fullscreen.html',
+                filename: 'fullscreen-page.html',
                 title: `${APP_NAME} - Run Scratch projects faster`,
                 ...htmlWebpackPluginCommon
             }),
             new HtmlWebpackPlugin({
                 chunks: ['embed'],
                 template: 'src/playground/embed.ejs',
-                filename: 'embed.html',
+                filename: 'embed-page.html',
                 title: `Embedded Project - ${APP_NAME}`,
                 ...htmlWebpackPluginCommon
             }),
             new HtmlWebpackPlugin({
                 chunks: ['addon-settings'],
                 template: 'src/playground/simple.ejs',
-                filename: 'addons.html',
+                filename: 'addon-settings-page.html',
                 title: `Addon Settings - ${APP_NAME}`,
                 ...htmlWebpackPluginCommon
             }),
             new HtmlWebpackPlugin({
                 chunks: ['credits'],
                 template: 'src/playground/simple.ejs',
-                filename: 'credits.html',
+                filename: 'credits-page.html',
                 title: `${APP_NAME} Credits`,
                 ...htmlWebpackPluginCommon
             }),
