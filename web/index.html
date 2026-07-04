@@ -339,6 +339,8 @@
   };
 
   const startProject = () => {
+    const ac = audioContext();
+    if (ac && ac.state === 'suspended') ac.resume();
     s.greenFlag();
     isPlaying = true;
     projectLoaded = true;
@@ -426,7 +428,7 @@
     return response.arrayBuffer();
   };
 
-  const loadProjectById = async (projectId) => {
+  const loadProjectById = async (projectId, autoStart = true) => {
     loadUrlBtn.disabled = true;
     log('fetching project ' + projectId + '...');
     try {
@@ -435,10 +437,14 @@
       drop.classList.add('hidden');
       loaded = true;
       document.getElementById('container').classList.add('loaded');
-      log('green flag');
-      startProject();
-      if (s._shaderRenderer) s._shaderRenderer.render();
-      log('rendered: ' + s._shaderCanvas.width + 'x' + s._shaderCanvas.height);
+      if (autoStart) {
+        log('green flag');
+        startProject();
+        if (s._shaderRenderer) s._shaderRenderer.render();
+        log('rendered: ' + s._shaderCanvas.width + 'x' + s._shaderCanvas.height);
+      } else {
+        log('loaded; press play to start');
+      }
     } catch (err) {
       log('load failed: ' + err.message);
       console.error(err);
@@ -454,7 +460,7 @@
       log('invalid Scratch URL');
       return;
     }
-    await loadProjectById(projectId);
+    await loadProjectById(projectId, true);
   };
 
   const getProjectIdFromLocation = () => {
@@ -474,10 +480,12 @@
   });
 
   // Auto-load from URL hash/path on page load.
+  // AudioContext cannot start without a user gesture, so we only load the
+  // project and wait for the user to press Play before starting it.
   const autoLoadProjectId = getProjectIdFromLocation();
   if (autoLoadProjectId) {
     urlInput.value = 'https://scratch.mit.edu/projects/' + autoLoadProjectId + '/';
-    loadProjectById(autoLoadProjectId);
+    loadProjectById(autoLoadProjectId, false);
   }
 
   // Drag & drop
