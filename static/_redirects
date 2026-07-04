@@ -1,5 +1,8 @@
 /addons /addons.html 200
 /credits /credits.html 200
+/editor /editor.html 200
+/fullscreen /fullscreen.html 200
+/embed /embed.html 200
 /:id/editor /editor.html 200
 /:id/fullscreen /fullscreen.html 200
 /:id/embed /embed.html 200
