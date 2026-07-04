@@ -41,10 +41,10 @@ const base = {
         historyApiFallback: {
             rewrites: [
                 {from: /^\/\d+\/?$/, to: '/index.html'},
-                {from: /^\/\d+\/fullscreen\/?$/, to: '/fullscreen.html'},
-                {from: /^\/\d+\/editor\/?$/, to: '/editor.html'},
-                {from: /^\/\d+\/embed\/?$/, to: '/embed.html'},
-                {from: /^\/addons\/?$/, to: '/addons.html'}
+                {from: /^\/\d+\/fullscreen\/?$/, to: '/fullscreen.htm'},
+                {from: /^\/\d+\/editor\/?$/, to: '/editor.htm'},
+                {from: /^\/\d+\/embed\/?$/, to: '/embed.htm'},
+                {from: /^\/addons\/?$/, to: '/addons.htm'}
             ]
         }
     },
@@ -185,7 +185,7 @@ module.exports = [
             new HtmlWebpackPlugin({
                 chunks: ['editor'],
                 template: 'src/playground/index.ejs',
-                filename: 'editor-page.html',
+                filename: 'editor-page.htm',
                 title: `${APP_NAME} - Run Scratch projects faster`,
                 isEditor: true,
                 ...htmlWebpackPluginCommon
@@ -200,28 +200,28 @@ module.exports = [
             new HtmlWebpackPlugin({
                 chunks: ['fullscreen'],
                 template: 'src/playground/index.ejs',
-                filename: 'fullscreen-page.html',
+                filename: 'fullscreen-page.htm',
                 title: `${APP_NAME} - Run Scratch projects faster`,
                 ...htmlWebpackPluginCommon
             }),
             new HtmlWebpackPlugin({
                 chunks: ['embed'],
                 template: 'src/playground/embed.ejs',
-                filename: 'embed-page.html',
+                filename: 'embed-page.htm',
                 title: `Embedded Project - ${APP_NAME}`,
                 ...htmlWebpackPluginCommon
             }),
             new HtmlWebpackPlugin({
                 chunks: ['addon-settings'],
                 template: 'src/playground/simple.ejs',
-                filename: 'addon-settings-page.html',
+                filename: 'addon-settings-page.htm',
                 title: `Addon Settings - ${APP_NAME}`,
                 ...htmlWebpackPluginCommon
             }),
             new HtmlWebpackPlugin({
                 chunks: ['credits'],
                 template: 'src/playground/simple.ejs',
-                filename: 'credits-page.html',
+                filename: 'credits-page.htm',
                 title: `${APP_NAME} Credits`,
                 ...htmlWebpackPluginCommon
             }),

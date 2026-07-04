@@ -1,9 +1,9 @@
-/addons /addon-settings-page.html 200
-/credits /credits-page.html 200
-/editor /editor-page.html 200
-/fullscreen /fullscreen-page.html 200
-/embed /embed-page.html 200
-/:id/editor /editor-page.html 200
-/:id/fullscreen /fullscreen-page.html 200
-/:id/embed /embed-page.html 200
+/addons /addon-settings-page.htm 200
+/credits /credits-page.htm 200
+/editor /editor-page.htm 200
+/fullscreen /fullscreen-page.htm 200
+/embed /embed-page.htm 200
+/:id/editor /editor-page.htm 200
+/:id/fullscreen /fullscreen-page.htm 200
+/:id/embed /embed-page.htm 200
 /:id /index.html 200
