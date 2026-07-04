@@ -56,6 +56,7 @@ export default async function ({addon, console}) {
   let shaderEnabled = false;
   let listDataCache = null;
   let shaderListRefreshTimer = null;
+  let shadersDirty = false;
 
   // --- data bridges ---
   const readShaderVariable = (name) => {
@@ -326,6 +327,7 @@ export default async function ({addon, console}) {
     skipProceduresOnCPU(proccodesToSkip);
 
     shaderEnabled = true;
+    shadersDirty = false;
     console.log('[gpu-shader] Enabled. Screen:', screenEnabled, 'Compute kernels:', kernelScheduler.kernels.length);
   };
 
@@ -351,11 +353,20 @@ export default async function ({addon, console}) {
 
   // --- lifecycle hooks ---
   vm.runtime.on('PROJECT_LOADED', () => {
+    shadersDirty = true;
     tryEnableShader();
   });
 
+  vm.runtime.on('PROJECT_CHANGED', () => {
+    shadersDirty = true;
+  });
+
   vm.runtime.on('PROJECT_START', () => {
-    tryEnableShader();
+    if (shadersDirty) {
+      tryEnableShader();
+    } else if (shaderRenderer && shaderEnabled) {
+      shaderRenderer.resetTime();
+    }
     if (shaderRenderer && shaderEnabled) {
       startShaderListRefresh();
     }
