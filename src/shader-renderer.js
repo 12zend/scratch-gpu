@@ -28,6 +28,7 @@ class ShaderRenderer {
     this._buffer = this.gl.createBuffer();
     this._startTime = 0;
     this._running = false;
+    this._pausedAt = null;
     this._lastError = null;
     this._listTextures = [];
     this._listPackInfo = [];
@@ -363,10 +364,23 @@ class ShaderRenderer {
 
   resetTime () {
     this._startTime = performance.now();
+    this._pausedAt = null;
   }
 
   getTime () {
-    return (performance.now() - this._startTime) / 1000;
+    const now = this._pausedAt !== null ? this._pausedAt : performance.now();
+    return (now - this._startTime) / 1000;
+  }
+
+  pauseTime () {
+    if (this._pausedAt !== null) return;
+    this._pausedAt = performance.now();
+  }
+
+  resumeTime () {
+    if (this._pausedAt === null) return;
+    this._startTime += performance.now() - this._pausedAt;
+    this._pausedAt = null;
   }
 
   start () {

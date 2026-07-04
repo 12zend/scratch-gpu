@@ -343,9 +343,16 @@
   const startProject = () => {
     const ac = audioContext();
     if (ac && ac.state === 'suspended') ac.resume();
+    const c = clock();
+    if (c && c._paused) {
+      const dt = Date.now() - c._pauseRealTime;
+      c._projectTimer.startTime += dt;
+      c._paused = false;
+    }
+    const sr = shaderRenderer();
+    if (sr) sr.resumeTime();
     const fl = frameLoop();
     if (fl && !fl.running) fl.start();
-    const sr = shaderRenderer();
     if (sr && !sr._running) sr.start();
     s.greenFlag();
     isPlaying = true;
@@ -356,10 +363,15 @@
 
   const resume = () => {
     const c = clock();
-    if (c && c._paused) c.resume();
+    if (c && c._paused) {
+      const dt = Date.now() - c._pauseRealTime;
+      c._projectTimer.startTime += dt;
+      c._paused = false;
+    }
+    const sr = shaderRenderer();
+    if (sr) sr.resumeTime();
     const fl = frameLoop();
     if (fl && !fl.running) fl.start();
-    const sr = shaderRenderer();
     if (sr && !sr._running) sr.start();
     const ac = audioContext();
     if (ac && ac.state === 'suspended') ac.resume();
@@ -370,10 +382,15 @@
 
   const pause = () => {
     const c = clock();
-    if (c && !c._paused) c.pause();
+    if (c && !c._paused) {
+      c._pausedTime = c._projectTimer.timeElapsed();
+      c._pauseRealTime = Date.now();
+      c._paused = true;
+    }
+    const sr = shaderRenderer();
+    if (sr) sr.pauseTime();
     const fl = frameLoop();
     if (fl && fl.running) fl.stop();
-    const sr = shaderRenderer();
     if (sr && sr._running) sr.stop();
     const ac = audioContext();
     if (ac && ac.state === 'running') ac.suspend();
