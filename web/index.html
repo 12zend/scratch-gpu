@@ -332,6 +332,8 @@
     return engine && engine.audioContext;
   };
 
+  const clock = () => s.vm && s.vm.runtime && s.vm.runtime.ioDevices && s.vm.runtime.ioDevices.clock;
+
   const setPlayIcon = (playing) => {
     playPauseBtn.innerHTML = playing ? pauseIcon : playIcon;
     playPauseBtn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
@@ -341,6 +343,10 @@
   const startProject = () => {
     const ac = audioContext();
     if (ac && ac.state === 'suspended') ac.resume();
+    const fl = frameLoop();
+    if (fl && !fl.running) fl.start();
+    const sr = shaderRenderer();
+    if (sr && !sr._running) sr.start();
     s.greenFlag();
     isPlaying = true;
     projectLoaded = true;
@@ -349,6 +355,8 @@
   };
 
   const resume = () => {
+    const c = clock();
+    if (c && c._paused) c.resume();
     const fl = frameLoop();
     if (fl && !fl.running) fl.start();
     const sr = shaderRenderer();
@@ -361,6 +369,8 @@
   };
 
   const pause = () => {
+    const c = clock();
+    if (c && !c._paused) c.pause();
     const fl = frameLoop();
     if (fl && fl.running) fl.stop();
     const sr = shaderRenderer();
@@ -384,10 +394,7 @@
 
   reloadBtn.addEventListener('click', () => {
     pause();
-    s.greenFlag();
-    isPlaying = true;
-    projectLoaded = true;
-    setPlayIcon(true);
+    startProject();
     log('reloaded');
   });
 
