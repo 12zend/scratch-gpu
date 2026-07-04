@@ -244,22 +244,18 @@
     box-shadow: 0 0 0 1px var(--border);
   }
 
-  /* Hide everything inside scaffolding except the shader canvas. */
-  .sc-root .sc-canvas,
-  .sc-root .sc-scaled-overlays-outer,
-  .sc-root .sc-monitor-overlay,
-  .sc-root .sc-question-root,
-  .sc-root .sc-controls-bar {
-    display: none !important;
-  }
+  /* Keep the web app's own controls; scaffolding's built-in bar is not needed. */
+  .sc-root .sc-controls-bar { display: none !important; }
   /* Hide the shader diagnostics overlay. */
   .sc-shader-status { display: none !important; }
-  /* Let the shader canvas receive right-clicks so Chrome's image
-     context menu (save / copy / open in new tab) shows up. */
-  .sc-shader-canvas { pointer-events: auto !important; }
+  /* The shader canvas is composited over the normal Scratch renderer.
+     Pointer events pass through so sprites and the stage remain clickable. */
+  .sc-shader-canvas { pointer-events: none !important; }
   .sc-root {
     background: #000;
   }
+  /* Hide the Scratch stage until a project is loaded so the pre-load screen stays black. */
+  #container:not(.loaded) .sc-canvas { display: none !important; }
 </style>
 </head>
 <body>
@@ -438,6 +434,7 @@
       await s.loadProject(data);
       drop.classList.add('hidden');
       loaded = true;
+      document.getElementById('container').classList.add('loaded');
       log('green flag');
       startProject();
       if (s._shaderRenderer) s._shaderRenderer.render();
@@ -503,6 +500,7 @@
       await s.loadProject(buf);
       drop.classList.add('hidden');
       loaded = true;
+      document.getElementById('container').classList.add('loaded');
       if (document.activeElement && document.activeElement.blur) {
         document.activeElement.blur();
       }

@@ -456,6 +456,7 @@ export class ScratchShaderCompiler {
     }
     const colorGlobal = 'sc_color';
     lines.push(`float ${colorGlobal};`);
+    lines.push('float sc_color_written;');
     lines.push('');
     this._packLists();
     if (this._listPacks.length) {
@@ -559,6 +560,7 @@ export class ScratchShaderCompiler {
       lines.push(`  ${v} = ${this._globalVarInitializers.get(v) || '0.0'};`);
     }
     lines.push('  sc_color = 0.0;');
+    lines.push('  sc_color_written = 0.0;');
     if (mode === 'compute') {
       if (paramCount !== 1) {
         this.errors.push(`Compute kernel "${this._pixel.proccode}" must accept exactly one parameter (index); found ${paramCount}.`);
@@ -579,7 +581,7 @@ export class ScratchShaderCompiler {
     lines.push('  float cr = floor(c / 65536.0);');
     lines.push('  float cg = mod(floor(c / 256.0), 256.0);');
     lines.push('  float cb = mod(c, 256.0);');
-    lines.push('  gl_FragColor = vec4(cr / 255.0, cg / 255.0, cb / 255.0, 1.0);');
+    lines.push('  gl_FragColor = vec4(cr / 255.0, cg / 255.0, cb / 255.0, sc_color_written);');
     lines.push('}');
   }
 
@@ -701,14 +703,18 @@ export class ScratchShaderCompiler {
       case 'data_setvariableto': {
         const name = this._getField(b, 'VARIABLE');
         const val = this._inputExpr(b, 'VALUE');
-        return `${ind}${this._varTarget(name)} = ${val};`;
+        const target = this._varTarget(name);
+        const writeFlag = String(name).toLowerCase() === 'color' ? `\n${ind}sc_color_written = 1.0;` : '';
+        return `${ind}${target} = ${val};${writeFlag}`;
       }
       case 'data_changevariableby': {
         const name = this._getField(b, 'VARIABLE');
         const valLit = this._literalValue(b, 'VALUE');
         if (valLit === 0) return `${ind}`;
         const val = this._inputExpr(b, 'VALUE');
-        return `${ind}${this._varTarget(name)} += ${val};`;
+        const target = this._varTarget(name);
+        const writeFlag = String(name).toLowerCase() === 'color' ? `\n${ind}sc_color_written = 1.0;` : '';
+        return `${ind}${target} += ${val};${writeFlag}`;
       }
       case 'control_if': {
         const cond = this._condExpr(b, 'CONDITION');

@@ -85570,6 +85570,8 @@ function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object
 function _toPropertyKey(t) { var i = _toPrimitive(t, "string"); return "symbol" == typeof i ? i : i + ""; }
 function _toPrimitive(t, r) { if ("object" != typeof t || !t) return t; var e = t[Symbol.toPrimitive]; if (void 0 !== e) { var i = e.call(t, r || "default"); if ("object" != typeof i) return i; throw new TypeError("@@toPrimitive must return a primitive value."); } return ("string" === r ? String : Number)(t); }
 const SUBSTACK_INPUTS = new Set(['SUBSTACK', 'SUBSTACK2', 'SUBSTACK3']);
+const MAX_LOOP = 256;
+const MAX_UNROLL = 128;
 const getProcLabel = proccode => proccode.replace(/%[nsb]/g, '').trim().toLowerCase();
 const inputChild = input => {
   if (!input) return null;
@@ -85794,6 +85796,290 @@ class GpuKernelDetector {
       reason: ''
     };
   }
+
+  /**
+   * Collect read/write sets for each statement in a loop body and detect
+   * cross-iteration dependencies (e.g. accumulators or self-reading lists).
+   * Also performs a recursive aggregate check for nested control blocks.
+   */
+  _collectBodyReadsWrites(bodyId, blocks) {
+    const statements = [];
+    let id = bodyId;
+    while (id) {
+      const b = blocks._blocks[id];
+      if (!b) break;
+      const stmt = {
+        blockId: id,
+        writesVar: null,
+        writesList: null,
+        readsVars: new Set(),
+        readsLists: new Set()
+      };
+      if (b.opcode === 'data_setvariableto' || b.opcode === 'data_changevariableby') {
+        stmt.writesVar = getField(b, 'VARIABLE');
+      } else if (['data_replaceitemoflist', 'data_addtolist', 'data_insertatlist', 'data_deleteoflist', 'data_deletealloflist'].includes(b.opcode)) {
+        stmt.writesList = getField(b, 'LIST');
+      }
+      this._collectStatementReads(b, blocks, stmt);
+      statements.push(stmt);
+      id = b.next;
+    }
+    const crossIterationDeps = [];
+    for (const stmt of statements) {
+      // Variable read before write in the same statement -> accumulator pattern.
+      if (stmt.writesVar) {
+        for (const v of stmt.readsVars) {
+          if (v === stmt.writesVar) {
+            crossIterationDeps.push("variable \"".concat(v, "\" read before write"));
+          }
+        }
+      }
+      // List read while being written in the same statement.
+      if (stmt.writesList) {
+        for (const list of stmt.readsLists) {
+          if (list === stmt.writesList) {
+            crossIterationDeps.push("list \"".concat(list, "\" read while being written"));
+          }
+        }
+      }
+    }
+    const allReadsVars = new Set();
+    const allReadsLists = new Set();
+    const allWritesVars = new Set();
+    const allWritesLists = new Set();
+    for (const stmt of statements) {
+      stmt.readsVars.forEach(v => allReadsVars.add(v));
+      stmt.readsLists.forEach(l => allReadsLists.add(l));
+      if (stmt.writesVar) allWritesVars.add(stmt.writesVar);
+      if (stmt.writesList) allWritesLists.add(stmt.writesList);
+    }
+
+    // Recursive aggregate check for nested control structures.
+    // We only use the recursive pass to augment read/write sets and to detect
+    // list self-reads inside nested blocks. Variable cross-iteration deps are
+    // handled per-statement to avoid false positives on local temporaries.
+    const recursive = this._collectRecursiveReadsWrites(bodyId, blocks);
+    recursive.readsVars.forEach(v => allReadsVars.add(v));
+    recursive.readsLists.forEach(l => allReadsLists.add(l));
+    recursive.writesVars.forEach(v => allWritesVars.add(v));
+    recursive.writesLists.forEach(l => allWritesLists.add(l));
+    for (const dep of recursive.crossIterationDeps) {
+      if (!crossIterationDeps.includes(dep) && dep.startsWith('list')) {
+        crossIterationDeps.push(dep);
+      }
+    }
+    return {
+      statements,
+      crossIterationDeps,
+      allReadsVars,
+      allReadsLists,
+      allWritesVars,
+      allWritesLists
+    };
+  }
+
+  /**
+   * Recursively walk a body (including nested substacks) and collect all
+   * variable/list reads and writes. Detect any variable or list that is both
+   * read and written, which is conservative but safe for GPU parallelization.
+   */
+  _collectRecursiveReadsWrites(bodyId, blocks) {
+    const readsVars = new Set();
+    const readsLists = new Set();
+    const writesVars = new Set();
+    const writesLists = new Set();
+    const crossIterationDeps = [];
+    this._walkAll(bodyId, blocks, b => {
+      if (b.opcode === 'data_variable') {
+        readsVars.add(getField(b, 'VARIABLE'));
+      } else if (b.opcode === 'data_itemoflist' || b.opcode === 'data_lengthoflist' || b.opcode === 'data_listcontainsitem') {
+        readsLists.add(getField(b, 'LIST'));
+      } else if (b.opcode === 'data_setvariableto' || b.opcode === 'data_changevariableby') {
+        writesVars.add(getField(b, 'VARIABLE'));
+      } else if (['data_replaceitemoflist', 'data_addtolist', 'data_insertatlist', 'data_deleteoflist', 'data_deletealloflist'].includes(b.opcode)) {
+        writesLists.add(getField(b, 'LIST'));
+      }
+    });
+    for (const v of writesVars) {
+      if (readsVars.has(v)) {
+        crossIterationDeps.push("variable \"".concat(v, "\" is both read and written"));
+      }
+    }
+    for (const list of writesLists) {
+      if (readsLists.has(list)) {
+        crossIterationDeps.push("list \"".concat(list, "\" is both read and written"));
+      }
+    }
+    return {
+      readsVars,
+      readsLists,
+      writesVars,
+      writesLists,
+      crossIterationDeps
+    };
+  }
+  _collectStatementReads(b, blocks, result) {
+    const readInputs = [];
+    switch (b.opcode) {
+      case 'data_setvariableto':
+      case 'data_changevariableby':
+        readInputs.push(b.inputs && b.inputs.VALUE);
+        break;
+      case 'data_replaceitemoflist':
+        readInputs.push(b.inputs && b.inputs.INDEX);
+        readInputs.push(b.inputs && b.inputs.ITEM);
+        break;
+      case 'data_addtolist':
+      case 'data_insertatlist':
+        readInputs.push(b.inputs && b.inputs.ITEM);
+        readInputs.push(b.inputs && b.inputs.INDEX);
+        break;
+      case 'data_deleteoflist':
+        readInputs.push(b.inputs && b.inputs.INDEX);
+        break;
+      default:
+        for (const key in b.inputs) {
+          if (!SUBSTACK_INPUTS.has(key)) {
+            readInputs.push(b.inputs[key]);
+          }
+        }
+    }
+    for (const input of readInputs) {
+      const childId = inputChild(input);
+      if (childId) this._collectExprReads(childId, blocks, result);
+    }
+  }
+  _collectExprReads(blockId, blocks, result) {
+    const b = blocks._blocks[blockId];
+    if (!b) return;
+    if (b.opcode === 'data_variable') {
+      result.readsVars.add(getField(b, 'VARIABLE'));
+    } else if (b.opcode === 'data_itemoflist' || b.opcode === 'data_lengthoflist' || b.opcode === 'data_listcontainsitem') {
+      result.readsLists.add(getField(b, 'LIST'));
+    }
+    for (const key in b.inputs) {
+      const childId = inputChild(b.inputs[key]);
+      if (childId) this._collectExprReads(childId, blocks, result);
+    }
+  }
+  _readLiteralNumber(b) {
+    if (!b) return null;
+    if (['math_number', 'math_positive_number', 'math_whole_number', 'math_integer', 'math_angle'].includes(b.opcode)) {
+      const n = parseFloat(getField(b, 'NUM'));
+      return isFinite(n) ? n : null;
+    }
+    if (b.opcode === 'text') {
+      const n = parseFloat(getField(b, 'TEXT'));
+      return isFinite(n) ? n : null;
+    }
+    return null;
+  }
+
+  /**
+   * Estimate the iteration count of a loop block when it is a literal.
+   * For for_each iterating over a list this usually returns unknown.
+   */
+  _estimateLoopCount(loopBlock, blocks) {
+    if (loopBlock.opcode === 'control_repeat') {
+      const timesId = inputChild(loopBlock.inputs && loopBlock.inputs.TIMES);
+      if (timesId) {
+        const n = this._readLiteralNumber(blocks._blocks[timesId]);
+        if (n !== null) return {
+          known: true,
+          value: Math.max(0, Math.round(n))
+        };
+      }
+      return {
+        known: false
+      };
+    }
+    if (loopBlock.opcode === 'control_for_each') {
+      const valueId = inputChild(loopBlock.inputs && loopBlock.inputs.VALUE);
+      if (valueId) {
+        const n = this._readLiteralNumber(blocks._blocks[valueId]);
+        if (n !== null) return {
+          known: true,
+          value: Math.max(0, Math.round(n))
+        };
+      }
+      return {
+        known: false
+      };
+    }
+    return {
+      known: false
+    };
+  }
+
+  /**
+   * Determine whether a loop body can be safely parallelized on the GPU.
+   * Returns: { parallelizable, pattern?, unrollable, outputList?, loopVar?, countInfo, reason }
+   */
+  _analyzeLoopParallelizability(loopBlock, bodyId, blocks, procedures) {
+    const bodySafe = this._isBodySafeForCompute(bodyId, blocks, procedures);
+    if (!bodySafe.supported) {
+      return {
+        parallelizable: false,
+        unrollable: false,
+        reason: "Unsupported opcodes: ".concat(bodySafe.reason)
+      };
+    }
+    const loopVar = getField(loopBlock, 'VARIABLE');
+    const rw = this._collectBodyReadsWrites(bodyId, blocks);
+    if (rw.crossIterationDeps.length > 0) {
+      return {
+        parallelizable: false,
+        unrollable: false,
+        reason: "Cross-iteration dependency: ".concat(rw.crossIterationDeps[0])
+      };
+    }
+
+    // Detect pure map pattern: for each i: replace item i of L with f(...)
+    const stmts = this._iterStatements(bodyId, blocks);
+    if (stmts.length === 1) {
+      const stmt = blocks._blocks[stmts[0]];
+      if (stmt.opcode === 'data_replaceitemoflist') {
+        const idxId = inputChild(stmt.inputs && stmt.inputs.INDEX);
+        const idxBlock = idxId ? blocks._blocks[idxId] : null;
+        const isLoopVarIndex = loopVar && idxBlock && idxBlock.opcode === 'data_variable' && getField(idxBlock, 'VARIABLE') === loopVar;
+        if (isLoopVarIndex) {
+          const listName = getField(stmt, 'LIST');
+          if (rw.allReadsLists.has(listName)) {
+            return {
+              parallelizable: false,
+              unrollable: false,
+              reason: "Map output list \"".concat(listName, "\" is also read in expression")
+            };
+          }
+          if (rw.allWritesVars.size > 0) {
+            return {
+              parallelizable: false,
+              unrollable: false,
+              reason: 'Map body modifies variables, creating potential cross-iteration dependencies'
+            };
+          }
+          return {
+            parallelizable: true,
+            pattern: 'map',
+            outputList: listName,
+            loopVar,
+            countInfo: this._estimateLoopCount(loopBlock, blocks),
+            reason: 'Pure map pattern (replace item i of list with f(i))'
+          };
+        }
+      }
+    }
+
+    // No cross-iteration dependencies, but not a recognized parallel pattern.
+    const countInfo = this._estimateLoopCount(loopBlock, blocks);
+    const unrollable = countInfo.known && countInfo.value >= 0 && countInfo.value <= MAX_UNROLL;
+    return {
+      parallelizable: false,
+      unrollable,
+      countInfo,
+      reason: 'No cross-iteration dependencies, but not a recognized GPU-parallel pattern'
+    };
+  }
   _findLoopCandidates(procedures) {
     const candidates = [];
     for (const info of procedures) {
@@ -85801,14 +86087,16 @@ class GpuKernelDetector {
         if (!b.opcode.startsWith('control_repeat') && b.opcode !== 'control_forever' && b.opcode !== 'control_for_each') return;
         const bodyId = inputChild(b.inputs && b.inputs.SUBSTACK);
         if (!bodyId) return;
-        const safe = this._isBodySafeForCompute(bodyId, info.blocks, procedures);
-        if (safe.supported) {
-          candidates.push({
-            location: "".concat(info.proccode),
-            opcode: b.opcode,
-            reason: 'Body uses only arithmetic/list ops; could be unrolled/parallelized on GPU'
-          });
-        }
+        const analysis = this._analyzeLoopParallelizability(b, bodyId, info.blocks, procedures);
+        candidates.push({
+          location: "".concat(info.proccode),
+          opcode: b.opcode,
+          parallelizable: analysis.parallelizable,
+          pattern: analysis.pattern || null,
+          unrollable: analysis.unrollable,
+          outputList: analysis.outputList || null,
+          reason: analysis.reason
+        });
       });
     }
     return candidates;
@@ -86226,6 +86514,11 @@ class GpuKernelDetector {
         const varName = getField(b, 'VARIABLE');
         const bodyId = inputChild(b.inputs && b.inputs.SUBSTACK);
         if (!varName || !bodyId) return;
+        const analysis = this._analyzeLoopParallelizability(b, bodyId, info.blocks, procedures);
+        if (!analysis.parallelizable || analysis.pattern !== 'map') {
+          this.warnings.push("Loop in \"".concat(info.proccode, "\" was not auto-GPUized: ").concat(analysis.reason));
+          return;
+        }
         const bodyHead = info.blocks._blocks[bodyId];
         if (!bodyHead || bodyHead.opcode !== 'data_replaceitemoflist') return;
         if (bodyHead.next) return; // only single-statement bodies for now
@@ -86238,7 +86531,10 @@ class GpuKernelDetector {
         const exprId = inputChild(bodyHead.inputs && bodyHead.inputs.ITEM);
         if (!listName || !exprId) return;
         const safe = this._isBodySafeForCompute(bodyId, info.blocks, procedures);
-        if (!safe.supported) return;
+        if (!safe.supported) {
+          this.warnings.push("Cannot auto-GPUize loop for list \"".concat(listName, "\": unsupported opcodes: ").concat(safe.reason));
+          return;
+        }
         const proccode = "gpu_".concat(listName);
         if (existingProccodes.has(proccode)) {
           this.warnings.push("Cannot auto-GPUize loop for list \"".concat(listName, "\": a block named \"").concat(proccode, "\" already exists."));
@@ -86251,7 +86547,8 @@ class GpuKernelDetector {
           injected.push({
             proccode,
             listName,
-            source: info.proccode
+            source: info.proccode,
+            reason: analysis.reason
           });
         } catch (e) {
           this.warnings.push("Failed to auto-GPUize loop for list \"".concat(listName, "\": ").concat(e && e.message));
@@ -86401,9 +86698,10 @@ const MAX_TEX_SIZE = 2048;
 const getProcLabel = proccode => proccode.replace(/%[nsb]/g, '').trim().toLowerCase();
 const generateId = () => 'gpu_' + Math.random().toString(36).slice(2) + '_' + Date.now();
 class GpuKernelScheduler {
-  constructor(scaffolding, shaderRenderer) {
+  constructor(scaffolding, shaderRenderer, restoreCpuCallback) {
     this.scaffolding = scaffolding;
     this.shaderRenderer = shaderRenderer;
+    this._restoreCpuCallback = restoreCpuCallback || null;
     this.kernels = [];
     this.diagnostics = {
       detected: [],
@@ -86413,6 +86711,8 @@ class GpuKernelScheduler {
     };
     this.running = false;
     this._rafId = null;
+    this._kernelFailures = new Map();
+    this._maxKernelFailures = 3;
   }
   detectAndCompile() {
     this.kernels = [];
@@ -86511,12 +86811,37 @@ class GpuKernelScheduler {
       console.warn("[gpu-kernel-scheduler] List \"".concat(entry.outputListName, "\" is too large; only first ").concat(MAX_TEX_SIZE * MAX_TEX_SIZE, " elements will be updated."));
     }
     const result = this.shaderRenderer.runComputePass(entry.compiled, width, height, () => this.scaffolding._buildVariableCache(), name => this.scaffolding._readShaderList(name));
-    if (!result) return;
+    if (!result) {
+      this._handleKernelFailure(entry);
+      return;
+    }
+    this._kernelFailures.delete(entry.kernel.proccode);
     const out = new Array(length);
     for (let i = 0; i < length; i++) {
       out[i] = result[i];
     }
     list.value = out;
+  }
+  _handleKernelFailure(entry) {
+    const proccode = entry.kernel.proccode;
+    const failures = (this._kernelFailures.get(proccode) || 0) + 1;
+    this._kernelFailures.set(proccode, failures);
+    const msg = "Compute kernel \"".concat(proccode, "\" runtime failure (").concat(failures, "/").concat(this._maxKernelFailures, ")");
+    this.diagnostics.warnings.push(msg);
+    console.warn("[gpu-kernel-scheduler] ".concat(msg));
+    if (failures >= this._maxKernelFailures) {
+      const fallbackMsg = "Disabling GPU compute kernel \"".concat(proccode, "\" and falling back to CPU execution.");
+      this.diagnostics.warnings.push(fallbackMsg);
+      console.warn("[gpu-kernel-scheduler] ".concat(fallbackMsg));
+      if (this._restoreCpuCallback) {
+        try {
+          this._restoreCpuCallback(proccode);
+        } catch (e) {
+          console.error('[gpu-kernel-scheduler] Failed to restore CPU execution:', e);
+        }
+      }
+      this.kernels = this.kernels.filter(k => k.kernel.proccode !== proccode);
+    }
   }
   _lookupOrCreateList(name) {
     const stage = this.scaffolding.vm.runtime.getTargetForStage();
@@ -87488,9 +87813,11 @@ class Scaffolding extends EventTarget {
     }
     const loopCandidates = diag.loopCandidates || [];
     if (loopCandidates.length) {
-      lines.push("Parallelizable loops found: ".concat(loopCandidates.length));
+      const auto = loopCandidates.filter(c => c.parallelizable).length;
+      lines.push("Parallelizable loops found: ".concat(auto, "/").concat(loopCandidates.length));
       for (const c of loopCandidates.slice(0, 5)) {
-        lines.push("  \u2022 ".concat(c.opcode, " in ").concat(c.location));
+        const badge = c.parallelizable ? '[GPU]' : c.unrollable ? '[unroll]' : '[CPU]';
+        lines.push("  \u2022 ".concat(badge, " ").concat(c.opcode, " in ").concat(c.location, ": ").concat(c.reason));
       }
       if (loopCandidates.length > 5) {
         lines.push("  \u2026and ".concat(loopCandidates.length - 5, " more"));
@@ -87613,7 +87940,7 @@ class Scaffolding extends EventTarget {
     } else {
       this._shaderCanvas.style.display = 'none';
     }
-    this._kernelScheduler = new _gpu_kernel_scheduler_js__WEBPACK_IMPORTED_MODULE_10__["GpuKernelScheduler"](this, this._shaderRenderer);
+    this._kernelScheduler = new _gpu_kernel_scheduler_js__WEBPACK_IMPORTED_MODULE_10__["GpuKernelScheduler"](this, this._shaderRenderer, proccode => this._restoreProcedureOnCPU(proccode));
     const schedulerDiagnostics = this._kernelScheduler.detectAndCompile();
     diagnostics.kernels = schedulerDiagnostics.detected;
     diagnostics.loopCandidates = schedulerDiagnostics.loopCandidates;
@@ -87714,6 +88041,7 @@ class Scaffolding extends EventTarget {
     const set = new Set(proccodes);
     const targets = this.vm && this.vm.runtime && this.vm.runtime.targets || [];
     this._procedureBackups = [];
+    this._procedureBackupMap = new Map();
     for (const target of targets) {
       if (!target || !target.blocks || !target.blocks._blocks) continue;
       for (const id in target.blocks._blocks) {
@@ -87722,11 +88050,14 @@ class Scaffolding extends EventTarget {
         const protoId = b.inputs && b.inputs.custom_block && b.inputs.custom_block.block;
         const proto = protoId && target.blocks._blocks[protoId];
         if (!proto || !proto.mutation || !set.has(proto.mutation.proccode)) continue;
-        this._procedureBackups.push({
+        const backup = {
           blockId: id,
           originalNext: b.next,
-          targetBlocks: target.blocks
-        });
+          targetBlocks: target.blocks,
+          proccode: proto.mutation.proccode
+        };
+        this._procedureBackups.push(backup);
+        this._procedureBackupMap.set(proto.mutation.proccode, backup);
         b.next = null;
       }
     }
@@ -87738,6 +88069,17 @@ class Scaffolding extends EventTarget {
       if (b) b.next = backup.originalNext;
     }
     this._procedureBackups = [];
+    this._procedureBackupMap = null;
+  }
+  _restoreProcedureOnCPU(proccode) {
+    if (!this._procedureBackupMap) return;
+    const backup = this._procedureBackupMap.get(proccode);
+    if (!backup) return;
+    const b = backup.targetBlocks._blocks[backup.blockId];
+    if (b) b.next = backup.originalNext;
+    this._procedureBackupMap.delete(proccode);
+    const idx = this._procedureBackups.indexOf(backup);
+    if (idx >= 0) this._procedureBackups.splice(idx, 1);
   }
   recompileShader() {
     if (this.vm && this.vm.runtime) this._tryEnableShader();
@@ -88783,6 +89125,7 @@ class ScratchShaderCompiler {
     }
     const colorGlobal = 'sc_color';
     lines.push("float ".concat(colorGlobal, ";"));
+    lines.push('float sc_color_written;');
     lines.push('');
     this._packLists();
     if (this._listPacks.length) {
@@ -88889,6 +89232,7 @@ class ScratchShaderCompiler {
       lines.push("  ".concat(v, " = ").concat(this._globalVarInitializers.get(v) || '0.0', ";"));
     }
     lines.push('  sc_color = 0.0;');
+    lines.push('  sc_color_written = 0.0;');
     if (mode === 'compute') {
       if (paramCount !== 1) {
         this.errors.push("Compute kernel \"".concat(this._pixel.proccode, "\" must accept exactly one parameter (index); found ").concat(paramCount, "."));
@@ -88909,7 +89253,7 @@ class ScratchShaderCompiler {
     lines.push('  float cr = floor(c / 65536.0);');
     lines.push('  float cg = mod(floor(c / 256.0), 256.0);');
     lines.push('  float cb = mod(c, 256.0);');
-    lines.push('  gl_FragColor = vec4(cr / 255.0, cg / 255.0, cb / 255.0, 1.0);');
+    lines.push('  gl_FragColor = vec4(cr / 255.0, cg / 255.0, cb / 255.0, sc_color_written);');
     lines.push('}');
   }
   _stageVariableValues() {
@@ -89026,7 +89370,9 @@ class ScratchShaderCompiler {
         {
           const name = this._getField(b, 'VARIABLE');
           const val = this._inputExpr(b, 'VALUE');
-          return "".concat(ind).concat(this._varTarget(name), " = ").concat(val, ";");
+          const target = this._varTarget(name);
+          const writeFlag = String(name).toLowerCase() === 'color' ? "\n".concat(ind, "sc_color_written = 1.0;") : '';
+          return "".concat(ind).concat(target, " = ").concat(val, ";").concat(writeFlag);
         }
       case 'data_changevariableby':
         {
@@ -89034,7 +89380,9 @@ class ScratchShaderCompiler {
           const valLit = this._literalValue(b, 'VALUE');
           if (valLit === 0) return "".concat(ind);
           const val = this._inputExpr(b, 'VALUE');
-          return "".concat(ind).concat(this._varTarget(name), " += ").concat(val, ";");
+          const target = this._varTarget(name);
+          const writeFlag = String(name).toLowerCase() === 'color' ? "\n".concat(ind, "sc_color_written = 1.0;") : '';
+          return "".concat(ind).concat(target, " += ").concat(val, ";").concat(writeFlag);
         }
       case 'control_if':
         {
@@ -89054,10 +89402,15 @@ class ScratchShaderCompiler {
           const times = this._inputExpr(b, 'TIMES');
           const body = this._substack(b, 'SUBSTACK', ind + '  ');
           const literal = this._literalInt(b.inputs && b.inputs.TIMES);
-          if (literal !== null && literal >= 0 && literal <= MAX_UNROLL) {
-            const out = [];
-            for (let i = 0; i < literal; i++) out.push(body);
-            return out.join('\n');
+          if (literal !== null) {
+            if (literal >= 0 && literal <= MAX_UNROLL) {
+              const out = [];
+              for (let i = 0; i < literal; i++) out.push(body);
+              return out.join('\n');
+            }
+            if (literal > MAX_LOOP) {
+              this.warnings.push("Loop repeats ".concat(literal, " times but shader supports up to ").concat(MAX_LOOP, "; result may be incorrect."));
+            }
           }
           const lv = this._loopVar();
           return "".concat(ind, "for (int ").concat(lv, " = 0; ").concat(lv, " < ").concat(MAX_LOOP, "; ").concat(lv, "++) {\n").concat(ind, "  if (float(").concat(lv, ") >= ").concat(times, ") break;\n").concat(body, "\n").concat(ind, "}");
@@ -89081,6 +89434,10 @@ class ScratchShaderCompiler {
           const name = this._getField(b, 'VARIABLE');
           const count = this._inputExpr(b, 'VALUE');
           const body = this._substack(b, 'SUBSTACK', ind + '  ');
+          const literal = this._literalInt(b.inputs && b.inputs.VALUE);
+          if (literal !== null && literal > MAX_LOOP) {
+            this.warnings.push("for-each iterates ".concat(literal, " times but shader supports up to ").concat(MAX_LOOP, "; result may be incorrect."));
+          }
           const lv = this._loopVar();
           const target = this._varTarget(name);
           return "".concat(ind, "for (int ").concat(lv, " = 0; ").concat(lv, " < ").concat(MAX_LOOP, "; ").concat(lv, "++) {\n").concat(ind, "  if (float(").concat(lv, ") >= ").concat(count, ") break;\n").concat(ind, "  ").concat(target, " = float(").concat(lv, ") + 1.0;\n").concat(body, "\n").concat(ind, "}");
@@ -89121,6 +89478,7 @@ class ScratchShaderCompiler {
         }
       case 'control_forever':
         {
+          this.warnings.push('"forever" loop is compiled as a fixed 256-iteration loop in shader mode; it will not run forever.');
           const foreverBody = this._substack(b, 'SUBSTACK', ind + '  ');
           const fv = this._loopVar();
           return "".concat(ind, "for (int ").concat(fv, " = 0; ").concat(fv, " < ").concat(MAX_LOOP, "; ").concat(fv, "++) {\n").concat(foreverBody, "\n").concat(ind, "}");
@@ -89955,6 +90313,8 @@ class ShaderRenderer {
         gl.uniform3f(loc.lmeta, atlas.width, pack.height, pack.offset);
       }
     }
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
   _collectPackInfo(compiled, readList) {
