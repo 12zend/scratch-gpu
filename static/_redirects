@@ -1,0 +1,4 @@
+/:id/editor /editor.html 200
+/:id/fullscreen /fullscreen.html 200
+/:id/embed /embed.html 200
+/:id /index.html 200
