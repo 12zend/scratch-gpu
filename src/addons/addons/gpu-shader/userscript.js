@@ -355,12 +355,9 @@ export default async function ({addon, console}) {
   });
 
   vm.runtime.on('PROJECT_START', () => {
-    if (shaderRenderer) {
-      shaderRenderer.resetTime();
+    tryEnableShader();
+    if (shaderRenderer && shaderEnabled) {
       startShaderListRefresh();
-    }
-    if (kernelScheduler && !kernelScheduler.running) {
-      kernelScheduler.start();
     }
   });
 
