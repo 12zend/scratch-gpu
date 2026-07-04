@@ -8,6 +8,7 @@ declare module "@turbowarp/scaffolding" {
     editableLists: boolean;
     shouldConnectPeripherals: boolean;
     usePackagedRuntime: boolean;
+    framerate: number;
     appendTo(element: HTMLElement): void;
     relayout(): void;
     setup(): void;
@@ -16,6 +17,7 @@ declare module "@turbowarp/scaffolding" {
     start(): void;
     greenFlag(): void;
     stopAll(): void;
+    setFramerate(framerate: number): void;
     vm: import('scratch-vm');
   }
 }

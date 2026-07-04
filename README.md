@@ -112,6 +112,7 @@ scaffolding.resizeMode = 'preserve-ratio'; // or 'dynamic-resize' or 'stretch'
 scaffolding.editableLists = false;
 scaffolding.shouldConnectPeripherals = true;
 scaffolding.usePackagedRuntime = false;
+scaffolding.framerate = 60; // defaults to 30 (Scratch compatibility mode)
 ```
 
 Then tell scaffolding to initialize the runtime:

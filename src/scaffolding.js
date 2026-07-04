@@ -66,6 +66,7 @@ class Scaffolding extends EventTarget {
     this.editableLists = false;
     this.shouldConnectPeripherals = true;
     this.usePackagedRuntime = false;
+    this.framerate = 30;
 
     this.messages = defaultMessages;
 
@@ -754,7 +755,11 @@ class Scaffolding extends EventTarget {
 
   setup () {
     this.vm = new Packages.VM();
-    this.vm.setCompatibilityMode(true);
+    if (typeof this.framerate === 'number') {
+      this.vm.setFramerate(this.framerate);
+    } else {
+      this.vm.setCompatibilityMode(true);
+    }
     this.vm.setLocale(navigator.language);
     this.vm.on('MONITORS_UPDATE', this._onmonitorsupdate.bind(this));
     this.vm.runtime.on('QUESTION', this._onquestion.bind(this));
@@ -1048,6 +1053,13 @@ class Scaffolding extends EventTarget {
   stopAll () {
     this.vm.stopAll();
     if (this._kernelScheduler) this._kernelScheduler.stop();
+  }
+
+  setFramerate (framerate) {
+    this.framerate = framerate;
+    if (this.vm) {
+      this.vm.setFramerate(framerate);
+    }
   }
 
   _lookupVariable(name, type) {
