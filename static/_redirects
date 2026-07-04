@@ -6,4 +6,5 @@
 /:id/editor /editor-page.htm 200
 /:id/fullscreen /fullscreen-page.htm 200
 /:id/embed /embed-page.htm 200
-/:id /index.html 200
+/999999999 /index.html 200
+/* /index.html 200
