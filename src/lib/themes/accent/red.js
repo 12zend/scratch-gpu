@@ -1,24 +1,24 @@
 const guiColors = {
-    'motion-primary': '#ff4c4c',
-    'motion-primary-transparent': '#ff4c4ce6',
-    'motion-tertiary': '#cc3333',
+    'motion-primary': '#4096ff',
+    'motion-primary-transparent': '#4096ffe6',
+    'motion-tertiary': '#2c6fe0',
 
-    'looks-secondary': '#ff4c4c',
-    'looks-transparent': '#ff4d4d59',
-    'looks-light-transparent': '#ff4d4d26',
-    'looks-secondary-dark': 'hsla(0, 42%, 51%, 1)',
+    'looks-secondary': '#4096ff',
+    'looks-transparent': '#4096ff59',
+    'looks-light-transparent': '#4096ff26',
+    'looks-secondary-dark': 'hsla(213, 80%, 51%, 1)',
 
-    'extensions-primary': 'hsla(10, 85%, 65%, 1)',
-    'extensions-tertiary': 'hsla(10, 85%, 40%, 1)',
-    'extensions-transparent': 'hsla(10, 85%, 65%, 0.35)',
-    'extensions-light': 'hsla(10, 57%, 85%, 1)',
+    'extensions-primary': 'hsla(213, 85%, 65%, 1)',
+    'extensions-tertiary': 'hsla(213, 85%, 40%, 1)',
+    'extensions-transparent': 'hsla(213, 85%, 65%, 0.35)',
+    'extensions-light': 'hsla(213, 57%, 85%, 1)',
 
-    'drop-highlight': '#ff8c8c'
+    'drop-highlight': '#80b6ff'
 };
 
 const blockColors = {
-    checkboxActiveBackground: '#ff4c4c',
-    checkboxActiveBorder: '#cc3333'
+    checkboxActiveBackground: '#4096ff',
+    checkboxActiveBorder: '#2c6fe0'
 };
 
 export {
