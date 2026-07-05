@@ -516,14 +516,14 @@ class MenuBar extends React.Component {
                                     place={this.props.isRtl ? 'left' : 'right'}
                                 >
                                     <MenuSection>
-                                        <MenuItemLink href="https://scratch.mit.edu/users/GarboMuffin/#comments">
+                                        <MenuItemLink href="https://scratch.mit.edu/users/12zend/#comments">
                                             <FormattedMessage
                                                 defaultMessage="Some scripts encountered errors."
                                                 description="Link in error menu"
                                                 id="tw.menuBar.reportError1"
                                             />
                                         </MenuItemLink>
-                                        <MenuItemLink href="https://scratch.mit.edu/users/GarboMuffin/#comments">
+                                        <MenuItemLink href="https://scratch.mit.edu/users/12zend/#comments">
                                             <FormattedMessage
                                                 defaultMessage="This is a bug. Please report it."
                                                 description="Link in error menu"
@@ -691,20 +691,6 @@ class MenuBar extends React.Component {
                                             )}
                                         </SB3Downloader>
                                     </MenuSection>
-                                    {this.props.onClickPackager && (
-                                        <MenuSection>
-                                            <MenuItem
-                                                onClick={this.handleClickPackager}
-                                            >
-                                                <FormattedMessage
-                                                    defaultMessage="Package project"
-                                                    // eslint-disable-next-line max-len
-                                                    description="Menu bar item to open the current project in the packager"
-                                                    id="tw.menuBar.package"
-                                                />
-                                            </MenuItem>
-                                        </MenuSection>
-                                    )}
                                     <MenuSection>
                                         <MenuItem onClick={this.handleClickRestorePoints}>
                                             <FormattedMessage
@@ -1015,7 +1001,7 @@ class MenuBar extends React.Component {
                     <div className={styles.menuBarItem}>
                         <a
                             className={styles.feedbackLink}
-                            href="https://scratch.mit.edu/users/GarboMuffin/#comments"
+                            href="https://scratch.mit.edu/users/12zend/#comments"
                             rel="noopener noreferrer"
                             target="_blank"
                         >

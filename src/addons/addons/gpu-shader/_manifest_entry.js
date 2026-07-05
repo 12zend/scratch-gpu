@@ -1,5 +1,6 @@
 const manifest = {
   "enabledByDefault": true,
+  "dynamicDisable": true,
   "name": "GPU Shader",
   "description": "Detects GPU-processable custom blocks (e.g. pixel(x,y) screen kernels, gpu_<list> compute kernels, pen render patterns) in the loaded project, compiles them to WebGL fragment shaders, and runs them on a separate overlay canvas above the stage. CPU-side execution of the replaced procedures is suppressed automatically.",
   "credits": [

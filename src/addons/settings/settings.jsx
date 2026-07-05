@@ -92,6 +92,7 @@ const filterAddonsBySupport = () => {
     };
 };
 const {supported: supportedAddons, unsupported: unsupportedAddons} = filterAddonsBySupport();
+delete supportedAddons['gpu-shader'];
 
 const groupAddons = () => {
     const groups = {
@@ -1104,7 +1105,7 @@ class AddonSettingsComponent extends React.Component {
                             />
                         </div>
                         <a
-                            href="https://scratch.mit.edu/users/GarboMuffin/#comments"
+                            href="https://scratch.mit.edu/users/12zend/#comments"
                             target="_blank"
                             rel="noreferrer"
                             className={styles.feedbackButtonOuter}

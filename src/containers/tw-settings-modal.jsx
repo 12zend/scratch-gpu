@@ -6,6 +6,9 @@ import {connect} from 'react-redux';
 import {closeSettingsModal} from '../reducers/modals';
 import SettingsModalComponent from '../components/tw-settings-modal/settings-modal.jsx';
 import {defaultStageSize} from '../reducers/custom-stage-size';
+import SettingsStore from '../addons/settings-store-singleton';
+import Channels from '../addons/channels';
+import upstreamMeta from '../addons/generated/upstream-meta.json';
 
 const messages = defineMessages({
     newFramerate: {
@@ -30,6 +33,7 @@ class UsernameModal extends React.Component {
             'handleStageWidthChange',
             'handleStageHeightChange',
             'handleDisableCompilerChange',
+            'handleDisableGpuChange',
             'handleStoreProjectOptions'
         ]);
     }
@@ -76,6 +80,29 @@ class UsernameModal extends React.Component {
             enabled: !e.target.checked
         });
     }
+    handleDisableGpuChange (e) {
+        const disableGpu = e.target.checked;
+        // Persist the addon-enabled state so future loads honor it.
+        SettingsStore.setAddonEnabled('gpu-shader', !disableGpu);
+        // Broadcast to other open windows (player, etc.) so they re-sync.
+        if (Channels.changeChannel) {
+            Channels.changeChannel.postMessage({
+                version: upstreamMeta.commit,
+                store: SettingsStore.store
+            });
+        }
+        // Apply the change dynamically in THIS window's addon runner by
+        // dispatching an addon-changed event that api.js listens for.
+        SettingsStore.dispatchEvent(new CustomEvent('addon-changed', {
+            detail: disableGpu ? {
+                addonId: 'gpu-shader',
+                dynamicDisable: true
+            } : {
+                addonId: 'gpu-shader',
+                dynamicEnable: true
+            }
+        }));
+    }
     handleStageWidthChange (value) {
         this.props.vm.setStageSize(value, this.props.customStageSize.height);
     }
@@ -107,6 +134,7 @@ class UsernameModal extends React.Component {
                 onStageWidthChange={this.handleStageWidthChange}
                 onStageHeightChange={this.handleStageHeightChange}
                 onDisableCompilerChange={this.handleDisableCompilerChange}
+                onDisableGpuChange={this.handleDisableGpuChange}
                 stageWidth={this.props.customStageSize.width}
                 stageHeight={this.props.customStageSize.height}
                 customStageSizeEnabled={
@@ -146,7 +174,8 @@ UsernameModal.propTypes = {
         width: PropTypes.number,
         height: PropTypes.number
     }),
-    disableCompiler: PropTypes.bool
+    disableCompiler: PropTypes.bool,
+    disableGpu: PropTypes.bool
 };
 
 const mapStateToProps = state => ({
@@ -160,7 +189,8 @@ const mapStateToProps = state => ({
     removeLimits: !state.scratchGui.tw.runtimeOptions.miscLimits,
     warpTimer: state.scratchGui.tw.compilerOptions.warpTimer,
     customStageSize: state.scratchGui.customStageSize,
-    disableCompiler: !state.scratchGui.tw.compilerOptions.enabled
+    disableCompiler: !state.scratchGui.tw.compilerOptions.enabled,
+    disableGpu: !SettingsStore.getAddonEnabled('gpu-shader')
 });
 
 const mapDispatchToProps = dispatch => ({

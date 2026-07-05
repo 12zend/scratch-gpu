@@ -325,6 +325,27 @@ const DisableCompiler = props => (
     />
 );
 
+const DisableGpu = props => (
+    <BooleanSetting
+        {...props}
+        label={
+            <FormattedMessage
+                defaultMessage="Disable GPU"
+                description="Disable GPU setting"
+                id="tw.settingsModal.disableGpu"
+            />
+        }
+        help={
+            <FormattedMessage
+                // eslint-disable-next-line max-len
+                defaultMessage="Disables the experimental GPU shader acceleration pipeline. Projects will fall back to running entirely on the CPU. GPU acceleration is on by default."
+                description="Disable GPU help"
+                id="tw.settingsModal.disableGpuHelp"
+            />
+        }
+    />
+);
+
 const CustomStageSize = ({
     customStageSizeEnabled,
     stageWidth,
@@ -499,6 +520,10 @@ const SettingsModalComponent = props => (
                 value={props.disableCompiler}
                 onChange={props.onDisableCompilerChange}
             />
+            <DisableGpu
+                value={props.disableGpu}
+                onChange={props.onDisableGpuChange}
+            />
             {!props.isEmbedded && (
                 <StoreProjectOptions
                     {...props}
@@ -528,7 +553,9 @@ SettingsModalComponent.propTypes = {
     warpTimer: PropTypes.bool,
     onWarpTimerChange: PropTypes.func,
     disableCompiler: PropTypes.bool,
-    onDisableCompilerChange: PropTypes.func
+    onDisableCompilerChange: PropTypes.func,
+    disableGpu: PropTypes.bool,
+    onDisableGpuChange: PropTypes.func
 };
 
 export default injectIntl(SettingsModalComponent);
