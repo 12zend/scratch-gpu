@@ -26,3 +26,6 @@ npm-*
 
 # for act
 .secrets
+
+# Scratch/debug scratch output
+/tmp
