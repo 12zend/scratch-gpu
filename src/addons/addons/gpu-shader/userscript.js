@@ -58,6 +58,107 @@ export default async function ({addon, console}) {
   let shaderListRefreshTimer = null;
   let shadersDirty = false;
 
+  // --- pen-layer integration ---
+  // The screen shader is NOT rendered as a topmost overlay. Instead, every
+  // frame we blit the shader canvas's contents into the Scratch Pen skin
+  // (which lives in the renderer's pen layer, i.e. above the background and
+  // video layers but below sprites/speech bubbles). When the project has the
+  // Pen extension loaded, that extension's existing PenSkin is reused so any
+  // user-side pen blocks and our shader share the same layer; when no Pen
+  // extension is loaded, we lazily create our own PenSkin + drawable in the
+  // same PEN_LAYER group so the output still renders. The shader canvas
+  // itself stays attached to the overlay container for WebGL context lifetime
+  // reasons, but is always kept invisible (display: none) so it never paints
+  // on top of the stage; the user-visible image comes solely from the blit.
+  let _ownPenSkinId = -1;
+  let _ownPenDrawableId = -1;
+  let _blitTexture = null;
+
+  const penExtensionLoaded = () => {
+    const ext = vm && vm.extensionManager;
+    return !!ext && typeof ext.isExtensionLoaded === 'function' && ext.isExtensionLoaded('pen');
+  };
+
+  const ensurePenSkinId = () => {
+    const renderer = vm && vm.runtime && vm.runtime.renderer;
+    if (!renderer) return -1;
+
+    if (penExtensionLoaded()) {
+      const sid = renderer._penSkinId;
+      if (sid != null && sid >= 0 && renderer._allSkins && renderer._allSkins[sid]) return sid;
+      return -1;
+    }
+
+    if (_ownPenSkinId >= 0 && renderer._allSkins && renderer._allSkins[_ownPenSkinId]) {
+      return _ownPenSkinId;
+    }
+
+    cleanupOwnedPenLayer();
+    _ownPenSkinId = renderer.createPenSkin();
+    _ownPenDrawableId = renderer.createDrawable('pen');
+    if (renderer.markDrawableAsNoninteractive) {
+      renderer.markDrawableAsNoninteractive(_ownPenDrawableId);
+    }
+    renderer.updateDrawableSkinId(_ownPenDrawableId, _ownPenSkinId);
+    return _ownPenSkinId;
+  };
+
+  const cleanupOwnedPenLayer = () => {
+    const renderer = vm && vm.runtime && vm.runtime.renderer;
+    if (renderer) {
+      if (_ownPenDrawableId >= 0) {
+        try { renderer.destroyDrawable(_ownPenDrawableId, 'pen'); } catch (e) {}
+      }
+      if (_ownPenSkinId >= 0) {
+        try { renderer.destroySkin(_ownPenSkinId); } catch (e) {}
+      }
+      if (_blitTexture != null && renderer.gl) {
+        try { renderer.gl.deleteTexture(_blitTexture); } catch (e) {}
+      }
+    }
+    _ownPenDrawableId = -1;
+    _ownPenSkinId = -1;
+    _blitTexture = null;
+  };
+
+  const blitToPenLayer = () => {
+    const renderer = vm && vm.runtime && vm.runtime.renderer;
+    if (!renderer || !renderer.gl) return;
+    const skinId = ensurePenSkinId();
+    if (skinId < 0) return;
+    const skin = renderer._allSkins[skinId];
+    if (!skin || typeof skin._drawPenTexture !== 'function') return;
+
+    const gl = renderer.gl;
+    if (_blitTexture == null) _blitTexture = gl.createTexture();
+    if (_blitTexture == null) return;
+
+    skin.clear();
+    renderer.dirty = true;
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, _blitTexture);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    try {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, shaderCanvas);
+    } catch (e) {
+      console.error('[gpu-shader] blit texImage2D error:', e && e.message || e);
+      return;
+    }
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    try {
+      skin._drawPenTexture(_blitTexture);
+      renderer.dirty = true;
+      if (renderer.requestRedraw) renderer.requestRedraw();
+    } catch (e) {
+      console.error('[gpu-shader] PenSkin blit error:', e && e.message || e);
+    }
+  };
+
   // --- data bridges ---
   const readShaderVariable = (name) => {
     const targets = (vm && vm.runtime && vm.runtime.targets) || [];
@@ -293,7 +394,9 @@ export default async function ({addon, console}) {
       const stageW = (runtime.constructor.STAGE_WIDTH) || 480;
       const stageH = (runtime.constructor.STAGE_HEIGHT) || 360;
       shaderRenderer.resize(stageW * shaderScale, stageH * shaderScale);
-      shaderCanvas.style.display = 'block';
+      shaderCanvas.style.display = 'none';
+      shaderRenderer.clearPostRenderHooks();
+      shaderRenderer.addPostRenderHook(blitToPenLayer);
       shaderRenderer.resetTime();
       shaderRenderer.start();
       screenEnabled = true;
@@ -394,13 +497,17 @@ export default async function ({addon, console}) {
   };
 
   const disableShader = () => {
-    if (shaderRenderer) shaderRenderer.stop();
+    if (shaderRenderer) {
+      shaderRenderer.clearPostRenderHooks();
+      shaderRenderer.stop();
+    }
     if (kernelScheduler) {
       kernelScheduler.stop();
       kernelScheduler = null;
     }
     shaderCanvas.style.display = 'none';
     restoreProceduresOnCPU();
+    cleanupOwnedPenLayer();
     shaderEnabled = false;
   };
 
@@ -416,6 +523,7 @@ export default async function ({addon, console}) {
   // --- lifecycle hooks ---
   vm.runtime.on('PROJECT_LOADED', () => {
     shadersDirty = true;
+    cleanupOwnedPenLayer();
   });
 
   vm.runtime.on('PROJECT_CHANGED', () => {

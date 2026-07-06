@@ -57,6 +57,22 @@ class ShaderRenderer {
     this._computeProgramCacheKey = null;
     this._computeAtlas = null;
     this._computeAtlasCompiled = null;
+    this._postRenderHooks = [];
+  }
+
+  addPostRenderHook (fn) {
+    if (typeof fn === 'function' && this._postRenderHooks.indexOf(fn) === -1) {
+      this._postRenderHooks.push(fn);
+    }
+  }
+
+  removePostRenderHook (fn) {
+    const i = this._postRenderHooks.indexOf(fn);
+    if (i !== -1) this._postRenderHooks.splice(i, 1);
+  }
+
+  clearPostRenderHooks () {
+    this._postRenderHooks = [];
   }
 
   getGlErrors () {
@@ -464,6 +480,12 @@ class ShaderRenderer {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    for (const hook of this._postRenderHooks) {
+      try { hook(); } catch (e) {
+        console.error('[scaffolding-shader] post-render hook error:', e && e.message || e);
+      }
+    }
   }
 
   // The screen render path used to upload list data once at enable time. If a
