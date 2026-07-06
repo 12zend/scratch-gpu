@@ -43,6 +43,7 @@ class ShaderRenderer {
     this._lastVarVals = {};
     this._lastW = -1;
     this._lastH = -1;
+    this._screenListCache = new Map();
 
     this._computeProgram = null;
     this._computeFbo = null;
@@ -88,7 +89,7 @@ class ShaderRenderer {
     this._lastVarVals = {};
     this._lastW = -1;
     this._lastH = -1;
-    this._lastListSig = null;
+    this._screenListCache = new Map();
     const compiledProgram = this._compileProgram(compiled);
     if (!compiledProgram) return false;
     if (this._program) this.gl.deleteProgram(this._program);
@@ -422,9 +423,8 @@ class ShaderRenderer {
       gl.enableVertexAttribArray(this._locations.aPos);
       gl.vertexAttribPointer(this._locations.aPos, 2, gl.FLOAT, false, 0, 0);
       this._glStateReady = true;
-this._lastW = -1;
-    this._lastH = -1;
-    this._lastListSig = null;
+      this._lastW = -1;
+      this._lastH = -1;
       this._lastVarVals = {};
     }
     const w = this.canvas.width;
@@ -473,27 +473,35 @@ this._lastW = -1;
   // rebuild their atlas every frame (see _getComputeAtlas), but the screen
   // path's render() only reads this._listTextures[0]. To fix this without
   // re-uploading every frame (which allocates a width*height*4 Float32Array
-  // per call), compute a cheap per-list signature here and only re-upload
-  // when it changes.
+  // per call), compare each list element-wise against the last snapshot we
+  // uploaded and only re-upload when one actually changed. A hashed
+  // signature was tried first but silently missed single-element edits that
+  // fell between sample taps (e.g. setting item 1 of a 1-element list),
+  // which is exactly the case the user hit.
   _refreshListDataIfChanged () {
     const compiled = this._compiled;
     const specs = compiled && compiled.listTextures;
     if (!specs || !specs.length) return;
-    let sig = 0;
+    if (!this._screenListCache) this._screenListCache = new Map();
+    const cache = this._screenListCache;
+    let changed = false;
     for (const spec of specs) {
       const data = this._readList(spec.scratchName);
-      const len = data ? data.length : 0;
-      sig = (sig * 31 + len) | 0;
-      if (data) {
-        const step = Math.max(1, Math.floor(len / 16));
-        for (let i = 0; i < len; i += step) {
-          sig = (sig * 31 + (Math.floor(data[i] * 1000) | 0)) | 0;
-        }
+      const prev = cache.get(spec.scratchName);
+      if (data === prev) continue;
+      if (!data || !prev || data.length !== prev.length) {
+        cache.set(spec.scratchName, data);
+        changed = true;
+        continue;
       }
+      let diff = false;
+      for (let i = 0; i < data.length; i++) {
+        if (data[i] !== prev[i]) { diff = true; break; }
+      }
+      cache.set(spec.scratchName, data);
+      if (diff) changed = true;
     }
-    if (sig === this._lastListSig) return;
-    this._lastListSig = sig;
-    this.uploadListData();
+    if (changed) this.uploadListData();
   }
 
   _collectPackInfo (compiled, readList) {
