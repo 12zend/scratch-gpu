@@ -288,7 +288,7 @@ export default async function ({addon, console}) {
         return;
       }
       shaderRenderer.setVariableCacheProvider(() => buildVariableCache());
-      shaderRenderer.setListReader((name) => readShaderListCached(name));
+      shaderRenderer.setListReader((name) => readShaderList(name));
       shaderRenderer.uploadListData();
       const stageW = (runtime.constructor.STAGE_WIDTH) || 480;
       const stageH = (runtime.constructor.STAGE_HEIGHT) || 360;

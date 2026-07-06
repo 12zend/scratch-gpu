@@ -88,6 +88,7 @@ class ShaderRenderer {
     this._lastVarVals = {};
     this._lastW = -1;
     this._lastH = -1;
+    this._lastListSig = null;
     const compiledProgram = this._compileProgram(compiled);
     if (!compiledProgram) return false;
     if (this._program) this.gl.deleteProgram(this._program);
@@ -421,8 +422,9 @@ class ShaderRenderer {
       gl.enableVertexAttribArray(this._locations.aPos);
       gl.vertexAttribPointer(this._locations.aPos, 2, gl.FLOAT, false, 0, 0);
       this._glStateReady = true;
-      this._lastW = -1;
-      this._lastH = -1;
+this._lastW = -1;
+    this._lastH = -1;
+    this._lastListSig = null;
       this._lastVarVals = {};
     }
     const w = this.canvas.width;
@@ -434,6 +436,7 @@ class ShaderRenderer {
       this._lastH = h;
     }
     gl.uniform1f(this._locations.uTime, this.getTime());
+    this._refreshListDataIfChanged();
     const cache = this._readVariableCache();
     for (const v of this._locations.vars) {
       const val = cache[v.name] !== undefined ? cache[v.name] : 0;
@@ -461,6 +464,36 @@ class ShaderRenderer {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  // The screen render path used to upload list data once at enable time. If a
+  // list is mutated on the CPU side while the shader is running (push/append/
+  // set index), the GPU texture was never refreshed, so pixel(x,y) kept
+  // reading the snapshot from the first green flag. Compute kernels already
+  // rebuild their atlas every frame (see _getComputeAtlas), but the screen
+  // path's render() only reads this._listTextures[0]. To fix this without
+  // re-uploading every frame (which allocates a width*height*4 Float32Array
+  // per call), compute a cheap per-list signature here and only re-upload
+  // when it changes.
+  _refreshListDataIfChanged () {
+    const compiled = this._compiled;
+    const specs = compiled && compiled.listTextures;
+    if (!specs || !specs.length) return;
+    let sig = 0;
+    for (const spec of specs) {
+      const data = this._readList(spec.scratchName);
+      const len = data ? data.length : 0;
+      sig = (sig * 31 + len) | 0;
+      if (data) {
+        const step = Math.max(1, Math.floor(len / 16));
+        for (let i = 0; i < len; i += step) {
+          sig = (sig * 31 + (Math.floor(data[i] * 1000) | 0)) | 0;
+        }
+      }
+    }
+    if (sig === this._lastListSig) return;
+    this._lastListSig = sig;
+    this.uploadListData();
   }
 
   _collectPackInfo (compiled, readList) {
