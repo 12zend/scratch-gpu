@@ -1160,6 +1160,42 @@ export class ScratchShaderCompiler {
     return null;
   }
 
+  // Strict string-literal fold for comparison operands. Unlike
+  // _constFoldString, this does NOT fold data_variable (whose value
+  // mutates at runtime, so folding its initial value into a
+  // compile-time comparison freezes loop conditions that depend on it)
+  // or math_number (whose string ordering differs from numeric ordering,
+  // e.g. "10" < "9" as strings but 10 > 9 numerically). Only text and
+  // string ops on literals qualify — the cases where Scratch's
+  // case-insensitive string comparison semantics actually apply.
+  _constFoldStringLiteral (blockId) {
+    if (!blockId) return null;
+    const b = this._block(blockId);
+    if (!b) return null;
+    const op = b.opcode;
+    if (op === 'text') {
+      const t = this._getField(b, 'TEXT');
+      return t == null ? '' : String(t);
+    }
+    if (op === 'operator_join') {
+      const left = this._constFoldStringLiteral(this._inputChild(b.inputs.STRING1));
+      const right = this._constFoldStringLiteral(this._inputChild(b.inputs.STRING2));
+      if (left !== null && right !== null) return left + right;
+      return null;
+    }
+    if (op === 'operator_letter_of') {
+      const str = this._constFoldStringLiteral(this._inputChild(b.inputs.STRING));
+      const letterLit = this._literalValue(b, 'LETTER');
+      if (str !== null && letterLit !== null) {
+        const idx = Math.floor(letterLit);
+        if (idx >= 1 && idx <= str.length) return str[idx - 1];
+        return '';
+      }
+      return null;
+    }
+    return null;
+  }
+
   _evalMathop (which, n) {
     switch (which) {
       case 'abs': return Math.abs(n);
@@ -1205,24 +1241,24 @@ export class ScratchShaderCompiler {
     const op = b.opcode;
     switch (op) {
       case 'operator_lt': {
-        const s1 = this._constFoldString(this._inputChild(b.inputs.OPERAND1));
-        const s2 = this._constFoldString(this._inputChild(b.inputs.OPERAND2));
+        const s1 = this._constFoldStringLiteral(this._inputChild(b.inputs.OPERAND1));
+        const s2 = this._constFoldStringLiteral(this._inputChild(b.inputs.OPERAND2));
         if (s1 !== null && s2 !== null) {
           return s1.toLowerCase() < s2.toLowerCase() ? '(true)' : '(false)';
         }
         return `(${this._inputExpr(b, 'OPERAND1')} < ${this._inputExpr(b, 'OPERAND2')})`;
       }
       case 'operator_gt': {
-        const s1 = this._constFoldString(this._inputChild(b.inputs.OPERAND1));
-        const s2 = this._constFoldString(this._inputChild(b.inputs.OPERAND2));
+        const s1 = this._constFoldStringLiteral(this._inputChild(b.inputs.OPERAND1));
+        const s2 = this._constFoldStringLiteral(this._inputChild(b.inputs.OPERAND2));
         if (s1 !== null && s2 !== null) {
           return s1.toLowerCase() > s2.toLowerCase() ? '(true)' : '(false)';
         }
         return `(${this._inputExpr(b, 'OPERAND1')} > ${this._inputExpr(b, 'OPERAND2')})`;
       }
       case 'operator_equals': {
-        const s1 = this._constFoldString(this._inputChild(b.inputs.OPERAND1));
-        const s2 = this._constFoldString(this._inputChild(b.inputs.OPERAND2));
+        const s1 = this._constFoldStringLiteral(this._inputChild(b.inputs.OPERAND1));
+        const s2 = this._constFoldStringLiteral(this._inputChild(b.inputs.OPERAND2));
         if (s1 !== null && s2 !== null) {
           return s1.toLowerCase() === s2.toLowerCase() ? '(true)' : '(false)';
         }
@@ -1382,24 +1418,24 @@ export class ScratchShaderCompiler {
         return `mix(${a}, ${bb}, sc_rand(vec3(gl_FragCoord.xy, u_time + ${seed}.0)))`;
       }
       case 'operator_lt': {
-        const s1 = this._constFoldString(this._inputChild(b.inputs.OPERAND1));
-        const s2 = this._constFoldString(this._inputChild(b.inputs.OPERAND2));
+        const s1 = this._constFoldStringLiteral(this._inputChild(b.inputs.OPERAND1));
+        const s2 = this._constFoldStringLiteral(this._inputChild(b.inputs.OPERAND2));
         if (s1 !== null && s2 !== null) {
           return s1.toLowerCase() < s2.toLowerCase() ? '1.0' : '0.0';
         }
         return `((${this._inputExpr(b, 'OPERAND1')} < ${this._inputExpr(b, 'OPERAND2')}) ? 1.0 : 0.0)`;
       }
       case 'operator_gt': {
-        const s1 = this._constFoldString(this._inputChild(b.inputs.OPERAND1));
-        const s2 = this._constFoldString(this._inputChild(b.inputs.OPERAND2));
+        const s1 = this._constFoldStringLiteral(this._inputChild(b.inputs.OPERAND1));
+        const s2 = this._constFoldStringLiteral(this._inputChild(b.inputs.OPERAND2));
         if (s1 !== null && s2 !== null) {
           return s1.toLowerCase() > s2.toLowerCase() ? '1.0' : '0.0';
         }
         return `((${this._inputExpr(b, 'OPERAND1')} > ${this._inputExpr(b, 'OPERAND2')}) ? 1.0 : 0.0)`;
       }
       case 'operator_equals': {
-        const s1 = this._constFoldString(this._inputChild(b.inputs.OPERAND1));
-        const s2 = this._constFoldString(this._inputChild(b.inputs.OPERAND2));
+        const s1 = this._constFoldStringLiteral(this._inputChild(b.inputs.OPERAND1));
+        const s2 = this._constFoldStringLiteral(this._inputChild(b.inputs.OPERAND2));
         if (s1 !== null && s2 !== null) {
           return s1.toLowerCase() === s2.toLowerCase() ? '1.0' : '0.0';
         }
