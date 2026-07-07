@@ -64,6 +64,8 @@ export class ScratchShaderCompiler {
     this._keyUniforms = new Map();
     this._mutableIndexOffFns = new Map();
     this._readOnlyIndexOffFns = new Map();
+    this._sensingUniforms = new Map();
+    this._needsSensing = false;
   }
 
   _uid (logical, prefix) {
@@ -93,6 +95,15 @@ export class ScratchShaderCompiler {
 
   _isMutableList (scratchName) {
     return this._mutableListNames && this._mutableListNames.has(scratchName);
+  }
+
+  _sensingUniform (key) {
+    let name = this._sensingUniforms.get(key);
+    if (name) return name;
+    name = this._uid(key, 'u_s_');
+    this._sensingUniforms.set(key, name);
+    this._needsSensing = true;
+    return name;
   }
 
   _block (id) {
@@ -167,7 +178,8 @@ export class ScratchShaderCompiler {
       errors: this.errors,
       needsMouse: this._needsMouse,
       keyUniforms: Array.from(this._keyUniforms.entries()).map(([key, uniform]) => ({key, uniform})),
-      needsCounter: this._needsCounter
+      needsCounter: this._needsCounter,
+      sensingUniforms: Array.from(this._sensingUniforms.entries()).map(([key, uniform]) => ({key, uniform}))
     };
   }
 
@@ -184,8 +196,10 @@ export class ScratchShaderCompiler {
         const proccode = proto.mutation.proccode;
         let paramNames = [];
         try { paramNames = JSON.parse(proto.mutation.argumentnames || '[]'); } catch (e) { paramNames = []; }
+        let paramDefaults = [];
+        try { paramDefaults = JSON.parse(proto.mutation.argumentdefaults || '[]'); } catch (e) { paramDefaults = []; }
         const bodyHead = b.next || null;
-        const isReporter = this._bodyContainsReturn(bodyHead, blocks);
+        const isReporter = !!(proto.mutation && proto.mutation.return) || this._bodyContainsReturn(bodyHead, blocks);
         if (this._procedures.has(proccode)) {
           this.warnings.push(`Duplicate custom block definition ignored: ${proccode}`);
           continue;
@@ -193,6 +207,7 @@ export class ScratchShaderCompiler {
         this._procedures.set(proccode, {
           proccode,
           paramNames,
+          paramDefaults,
           bodyHead,
           isReporter,
           blocks
@@ -454,6 +469,11 @@ export class ScratchShaderCompiler {
     }
     if (this._needsCounter) {
       lines.push('uniform float u_counter;');
+    }
+    if (this._sensingUniforms.size) {
+      for (const [, uniformName] of this._sensingUniforms) {
+        lines.push(`uniform float ${uniformName};`);
+      }
     }
     if (this._keyUniforms.size) {
       for (const [, uniformName] of this._keyUniforms) {
@@ -840,8 +860,21 @@ export class ScratchShaderCompiler {
         }
         const fnName = this._uid(proccode, 'sc_fn_');
         const argIds = this._parseArgIds(b);
-        const args = argIds.map((aid) => this._inputExpr(b, aid));
-        const isReporter = this._procedures.get(proccode).isReporter;
+        const info = this._procedures.get(proccode);
+        const defaults = info.paramDefaults || [];
+        const args = argIds.map((aid, i) => {
+          const input = b.inputs && b.inputs[aid];
+          const childId = this._inputChild(input);
+          if (!childId) {
+            const def = defaults[i];
+            if (def !== undefined && def !== '') {
+              return glslNum(parseNum(def));
+            }
+            return '0.0';
+          }
+          return this._expr(childId);
+        });
+        const isReporter = info.isReporter;
         if (isReporter) {
           this.warnings.push(`Custom reporter "${proccode}" used as a statement; its return value is discarded.`);
         }
@@ -1324,9 +1357,62 @@ export class ScratchShaderCompiler {
       case 'control_get_counter':
         this._needsCounter = true;
         return 'u_counter';
+      case 'sensing_current': {
+        const menu = String(this._getField(b, 'CURRENTMENU') || '').toLowerCase();
+        const menuMap = {
+          'year': 'current_year',
+          'month': 'current_month',
+          'date': 'current_date',
+          'dayofweek': 'current_dayofweek',
+          'hour': 'current_hour',
+          'minute': 'current_minute',
+          'second': 'current_second'
+        };
+        const key = menuMap[menu];
+        if (!key) {
+          this.warnings.push(`sensing_current with unknown menu "${menu}"; returning 0.`);
+          return '0.0';
+        }
+        return this._sensingUniform(key);
+      }
+      case 'sensing_dayssince2000':
+        return this._sensingUniform('days_since_2000');
+      case 'sensing_answer':
+        return this._sensingUniform('answer');
+      case 'sensing_username':
+        this.warnings.push('"username" is not supported in shader mode; returning 0.');
+        return '0.0';
+      case 'sensing_of': {
+        const property = String(this._getField(b, 'PROPERTY') || '');
+        const lowerProp = property.toLowerCase();
+        if (lowerProp === 'x position' || lowerProp === 'y position' ||
+            lowerProp === 'direction' || lowerProp === 'size' ||
+            lowerProp === 'volume' || lowerProp === 'costume #' ||
+            lowerProp === 'costume name' || lowerProp === 'backdrop #' ||
+            lowerProp === 'backdrop name') {
+          const obj = this._inputExpr(b, 'OBJECT');
+          const key = `of_${property}_${obj}`;
+          return this._sensingUniform(key);
+        }
+        if (lowerProp === 'loudness' || lowerProp === 'loud') {
+          this.warnings.push(`sensing_of "${property}" is not supported in shader mode; returning 0.`);
+          return '0.0';
+        }
+        const obj2 = this._inputExpr(b, 'OBJECT');
+        const varKey = `of_var_${property}_${obj2}`;
+        return this._sensingUniform(varKey);
+      }
       case 'argument_reporter_string_number':
       case 'argument_reporter_boolean': {
         const name = String(this._getField(b, 'VALUE'));
+        const lower = name.toLowerCase();
+        if (lower === 'is turbowarp?' || lower === 'is compiled?') {
+          return '1.0';
+        }
+        if (lower === 'last key pressed') {
+          this.warnings.push('"last key pressed" is not supported in shader mode; returning 0.');
+          return '0.0';
+        }
         const mapped = this._scope && this._scope.get(name);
         if (mapped) return mapped;
         this.warnings.push(`Argument reporter "${name}" is not a parameter of this block; using 0.`);
@@ -1410,11 +1496,15 @@ export class ScratchShaderCompiler {
       case 'operator_random': {
         const a = this._inputExpr(b, 'FROM');
         const bb = this._inputExpr(b, 'TO');
-        // Each call site (and each dynamic invocation) must produce a distinct
-        // pseudo-random value. Using a per-call-site integer offset combined with
-        // gl_FragCoord and u_time ensures that multiple random() calls within the
-        // same pixel do not all collapse to the same number.
+        const aLit = this._literalValue(b, 'FROM');
+        const bLit = this._literalValue(b, 'TO');
         const seed = this._randCounter++;
+        if (aLit !== null && bLit !== null &&
+            Math.floor(aLit) === aLit && Math.floor(bLit) === bLit) {
+          const low = Math.min(aLit, bLit);
+          const high = Math.max(aLit, bLit);
+          return `floor(mix(${glslNum(low)}, ${glslNum(high)} + 1.0, sc_rand(vec3(gl_FragCoord.xy, u_time + ${seed}.0))))`;
+        }
         return `mix(${a}, ${bb}, sc_rand(vec3(gl_FragCoord.xy, u_time + ${seed}.0)))`;
       }
       case 'operator_lt': {
@@ -1460,14 +1550,38 @@ export class ScratchShaderCompiler {
         }
         const fnName = this._uid(proccode, 'sc_fn_');
         const argIds = this._parseArgIds(b);
-        const args = argIds.map((aid) => this._inputExpr(b, aid));
+        const info = this._procedures.get(proccode);
+        const defaults = info.paramDefaults || [];
+        const args = argIds.map((aid, i) => {
+          const input = b.inputs && b.inputs[aid];
+          const childId = this._inputChild(input);
+          if (!childId) {
+            const def = defaults[i];
+            if (def !== undefined && def !== '') {
+              return glslNum(parseNum(def));
+            }
+            return '0.0';
+          }
+          return this._expr(childId);
+        });
         return `${fnName}(${args.join(', ')})`;
       }
       case 'data_itemoflist': {
         const name = this._getField(b, 'LIST');
-        const idx = this._inputExpr(b, 'INDEX');
+        const indexBlock = b.inputs && b.inputs.INDEX && this._block(this._inputChild(b.inputs.INDEX));
+        const indexFieldValue = indexBlock && indexBlock.opcode === 'text'
+          ? this._getField(indexBlock, 'TEXT') : null;
         if (this._isMutableList(name)) {
           const rfn = this._mutableReaderName.get(name);
+          const lenVar = this._mutableLenName(name);
+          if (indexFieldValue === 'last') {
+            return `${rfn}(${lenVar})`;
+          }
+          if (indexFieldValue === 'random' || indexFieldValue === 'any') {
+            const rv = this._randCounter++;
+            return `${rfn}(floor(sc_rand(vec3(gl_FragCoord.xy, u_time + ${rv}.0)) * ${lenVar}) + 1.0)`;
+          }
+          const idx = this._inputExpr(b, 'INDEX');
           return `${rfn}(${idx})`;
         }
         const slot = this._listSlot.get(name);
@@ -1475,6 +1589,15 @@ export class ScratchShaderCompiler {
           this.warnings.push(`List "${name}" is written but never read in shader; returning 0.`);
           return '0.0';
         }
+        const swiz = ['x', 'y', 'z', 'w'][slot.channel];
+        if (indexFieldValue === 'last') {
+          return `sc_lget_${slot.texIndex}_${slot.channel}(sc_llen_${slot.texIndex}.${swiz})`;
+        }
+        if (indexFieldValue === 'random' || indexFieldValue === 'any') {
+          const rv = this._randCounter++;
+          return `sc_lget_${slot.texIndex}_${slot.channel}(floor(sc_rand(vec3(gl_FragCoord.xy, u_time + ${rv}.0)) * sc_llen_${slot.texIndex}.${swiz}) + 1.0)`;
+        }
+        const idx = this._inputExpr(b, 'INDEX');
         return `sc_lget_${slot.texIndex}_${slot.channel}(${idx})`;
       }
       case 'data_lengthoflist': {

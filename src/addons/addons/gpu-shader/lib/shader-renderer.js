@@ -156,6 +156,14 @@ class ShaderRenderer {
         loc: gl.getUniformLocation(program, k.uniform)
       });
     }
+    locations.sensing = [];
+    for (const s of compiled.sensingUniforms || []) {
+      locations.sensing.push({
+        key: s.key,
+        uniform: s.uniform,
+        loc: gl.getUniformLocation(program, s.uniform)
+      });
+    }
     return { program, locations };
   }
 
@@ -744,6 +752,14 @@ class ShaderRenderer {
       const keys = i.keys || {};
       for (const k of loc.keys) {
         gl.uniform1f(k.loc, keys[k.key] ? 1.0 : 0.0);
+      }
+    }
+    if (loc.sensing && loc.sensing.length) {
+      const i = getInput();
+      const sensing = i.sensing || {};
+      for (const s of loc.sensing) {
+        const val = sensing[s.key];
+        gl.uniform1f(s.loc, typeof val === 'number' ? val : 0);
       }
     }
   }

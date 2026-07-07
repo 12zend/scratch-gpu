@@ -226,6 +226,71 @@ export default async function ({addon, console}) {
     return cache;
   };
 
+  const parseNum = (v) => {
+    const n = typeof v === 'number' ? v : parseFloat(v);
+    return isNaN(n) ? 0 : n;
+  };
+
+  const findTargetByName = (name) => {
+    const runtime = vm && vm.runtime;
+    if (!runtime) return null;
+    const stripped = String(name).replace(/^["']|["']$/g, '');
+    if (stripped === '_stage_' || stripped === 'Stage' || stripped === '') {
+      return runtime.getTargetForStage && runtime.getTargetForStage();
+    }
+    const targets = runtime.targets || [];
+    for (const t of targets) {
+      if (t && t.isOriginal && t.getName && t.getName() === stripped) return t;
+    }
+    return null;
+  };
+
+  const lookupVariableValue = (target, varName) => {
+    if (!target || !target.variables) return 0;
+    for (const id in target.variables) {
+      const v = target.variables[id];
+      if (v.name === varName && v.type !== 'list') {
+        return parseNum(v.value);
+      }
+    }
+    return 0;
+  };
+
+  const readTargetAttribute = (target, propLower) => {
+    if (!target) return 0;
+    switch (propLower) {
+      case 'x position': return target.x || 0;
+      case 'y position': return target.y || 0;
+      case 'direction': return target.direction || 0;
+      case 'size': return target.size || 0;
+      case 'volume': return target.volume || 0;
+      case 'costume #': return (target.currentCostume != null ? target.currentCostume + 1 : 0);
+      case 'costume name': {
+        const costumes = target.getCostumes && target.getCostumes();
+        if (costumes && costumes[target.currentCostume]) {
+          return parseNum(costumes[target.currentCostume].name);
+        }
+        return 0;
+      }
+      case 'backdrop #': {
+        const stage = target.runtime && target.runtime.getTargetForStage && target.runtime.getTargetForStage();
+        if (stage) return (stage.currentCostume != null ? stage.currentCostume + 1 : 0);
+        return 0;
+      }
+      case 'backdrop name': {
+        const stage = target.runtime && target.runtime.getTargetForStage && target.runtime.getTargetForStage();
+        if (stage) {
+          const costumes = stage.getCostumes && stage.getCostumes();
+          if (costumes && costumes[stage.currentCostume]) {
+            return parseNum(costumes[stage.currentCostume].name);
+          }
+        }
+        return 0;
+      }
+      default: return 0;
+    }
+  };
+
   const buildInputCache = () => {
     const io = vm && vm.runtime && vm.runtime.ioDevices;
     const input = {};
@@ -238,9 +303,13 @@ export default async function ({addon, console}) {
       input.counter = vm.runtime.ext_scratch3_control._counter || 0;
     }
     const keySet = new Set();
+    const sensingSet = new Set();
     const addKeys = (compiled) => {
       if (compiled && compiled.keyUniforms) {
         for (const k of compiled.keyUniforms) keySet.add(k.key);
+      }
+      if (compiled && compiled.sensingUniforms) {
+        for (const s of compiled.sensingUniforms) sensingSet.add(s.key);
       }
     };
     if (shaderRenderer) addKeys(shaderRenderer._compiled);
@@ -253,6 +322,73 @@ export default async function ({addon, console}) {
         keys[key] = io.keyboard.getKeyIsDown(key);
       }
       input.keys = keys;
+    }
+    if (sensingSet.size) {
+      const sensing = {};
+      const now = new Date();
+      const runtime = vm && vm.runtime;
+      for (const key of sensingSet) {
+        switch (key) {
+          case 'current_year': sensing[key] = now.getFullYear(); break;
+          case 'current_month': sensing[key] = now.getMonth() + 1; break;
+          case 'current_date': sensing[key] = now.getDate(); break;
+          case 'current_dayofweek': sensing[key] = now.getDay() + 1; break;
+          case 'current_hour': sensing[key] = now.getHours(); break;
+          case 'current_minute': sensing[key] = now.getMinutes(); break;
+          case 'current_second': sensing[key] = now.getSeconds(); break;
+          case 'days_since_2000': {
+            const ms = Date.now() - Date.UTC(2000, 0, 1);
+            sensing[key] = ms / (24 * 60 * 60 * 1000);
+            break;
+          }
+          case 'answer': {
+            const sensingExt = runtime && runtime.ext_scratch3_sensing;
+            sensing[key] = sensingExt ? parseNum(sensingExt._answer) : 0;
+            break;
+          }
+          default: {
+            if (key.startsWith('of_var_')) {
+              const rest = key.substring('of_var_'.length);
+              const lastUnderscore = rest.lastIndexOf('_');
+              let propName = rest;
+              let objExpr = '';
+              if (lastUnderscore > 0) {
+                propName = rest.substring(0, lastUnderscore);
+                objExpr = rest.substring(lastUnderscore + 1);
+              }
+              const stripped = propName.replace(/^_+|_+$/g, '');
+              const objName = objExpr.replace(/^glslNum\(|\)$/g, '').replace(/\.0$/, '');
+              const target = findTargetByName(objName);
+              if (target) {
+                const v = lookupVariableValue(target, stripped);
+                sensing[key] = v;
+              } else {
+                sensing[key] = 0;
+              }
+            } else if (key.startsWith('of_')) {
+              const rest = key.substring('of_'.length);
+              const lastUnderscore = rest.lastIndexOf('_');
+              let propName = rest;
+              let objExpr = '';
+              if (lastUnderscore > 0) {
+                propName = rest.substring(0, lastUnderscore);
+                objExpr = rest.substring(lastUnderscore + 1);
+              }
+              const stripped = propName.replace(/^_+|_+$/g, '').toLowerCase();
+              const objName = objExpr.replace(/^glslNum\(|\)$/g, '').replace(/\.0$/, '');
+              const target = findTargetByName(objName);
+              if (target) {
+                sensing[key] = readTargetAttribute(target, stripped);
+              } else {
+                sensing[key] = 0;
+              }
+            } else {
+              sensing[key] = 0;
+            }
+          }
+        }
+      }
+      input.sensing = sensing;
     }
     return input;
   };
