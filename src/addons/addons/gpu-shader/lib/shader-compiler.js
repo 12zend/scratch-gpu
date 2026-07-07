@@ -15,12 +15,15 @@ const sanitize = (logical, prefix) => {
 
 const parseNum = (v) => {
   const n = typeof v === 'number' ? v : parseFloat(v);
-  return isFinite(n) ? n : 0;
+  return isNaN(n) ? 0 : n;
 };
 
 const glslNum = (n) => {
+  if (n === Infinity) return '1e20';
+  if (n === -Infinity) return '-1e20';
+  if (isNaN(n)) return '0.0';
   const s = String(n);
-  if (s.indexOf('.') === -1 && s.indexOf('e') === -1 && s.indexOf('E') === -1 && s.indexOf('inf') === -1 && s.indexOf('Inf') === -1 && s.indexOf('NaN') === -1) {
+  if (s.indexOf('.') === -1 && s.indexOf('e') === -1 && s.indexOf('E') === -1) {
     return s + '.0';
   }
   return s;
@@ -866,10 +869,10 @@ export class ScratchShaderCompiler {
         return `${ind}${body}`;
       }
       case 'control_clear_counter':
-        this.warnings.push('"clear counter" is not supported in shader mode (counter is CPU-side).');
+        this.warnings.push('"clear counter" is ignored in shader mode: a shared counter is not meaningful when every pixel runs in parallel.');
         return `${ind}`;
       case 'control_incr_counter':
-        this.warnings.push('"incr counter" is not supported in shader mode (counter is CPU-side).');
+        this.warnings.push('"incr counter" is ignored in shader mode: a shared counter is not meaningful when every pixel runs in parallel.');
         return `${ind}`;
       case 'data_replaceitemoflist': {
         const name = this._getField(b, 'LIST');
@@ -1345,10 +1348,7 @@ export class ScratchShaderCompiler {
         const nLit = this._literalValue(b, 'NUM');
         if (nLit !== null) {
           const r = this._evalMathop(which, nLit);
-          if (r !== null) {
-            if (!isFinite(r)) return r > 0 ? '1e20' : '-1e20';
-            return glslNum(r);
-          }
+          if (r !== null) return glslNum(r);
         }
         const n = this._inputExpr(b, 'NUM');
         switch (which) {
@@ -1457,7 +1457,7 @@ export class ScratchShaderCompiler {
         if (left !== null && right !== null) {
           const joined = left + right;
           const n = parseFloat(joined);
-          return isFinite(n) ? glslNum(n) : '0.0';
+          return isNaN(n) ? '0.0' : glslNum(n);
         }
         this.warnings.push('Dynamic "join" is not supported in shader mode; result is 0.');
         return '0.0';
@@ -1476,7 +1476,7 @@ export class ScratchShaderCompiler {
           if (idx >= 1 && idx <= str.length) {
             const ch = str[idx - 1];
             const n = parseFloat(ch);
-            return isFinite(n) ? glslNum(n) : '0.0';
+            return isNaN(n) ? '0.0' : glslNum(n);
           }
           return '0.0';
         }
