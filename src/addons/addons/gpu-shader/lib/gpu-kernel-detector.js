@@ -210,10 +210,13 @@ export class GpuKernelDetector {
     const safe = new Set([
       'data_variable', 'data_setvariableto', 'data_changevariableby',
       'data_itemoflist', 'data_lengthoflist', 'data_listcontainsitem',
+      'data_itemnumoflist', 'data_listcontents',
       'data_replaceitemoflist', 'data_addtolist', 'data_insertatlist',
       'data_deleteoflist', 'data_deletealloflist',
       'control_if', 'control_if_else', 'control_repeat', 'control_repeat_until',
       'control_while', 'control_for_each', 'control_forever', 'control_stop',
+      'control_all_at_once', 'control_get_counter',
+      'control_clear_counter', 'control_incr_counter',
       'procedures_call', 'procedures_return', 'procedures_definition',
       'argument_reporter_string_number', 'argument_reporter_boolean',
       'math_number', 'math_positive_number', 'math_whole_number', 'math_integer',
@@ -221,7 +224,10 @@ export class GpuKernelDetector {
       'operator_add', 'operator_subtract', 'operator_multiply', 'operator_divide',
       'operator_mod', 'operator_round', 'operator_mathop', 'operator_random',
       'operator_lt', 'operator_gt', 'operator_equals', 'operator_and', 'operator_or',
-      'operator_not', 'sensing_timer'
+      'operator_not', 'operator_join', 'operator_length',
+      'operator_letter_of', 'operator_contains',
+      'sensing_timer', 'sensing_mousex', 'sensing_mousey',
+      'sensing_mousedown', 'sensing_keypressed'
     ]);
     this._walkAll(headId, blocks, (b) => {
       const op = b.opcode;
@@ -340,7 +346,7 @@ export class GpuKernelDetector {
     this._walkAll(bodyId, blocks, (b) => {
       if (b.opcode === 'data_variable') {
         readsVars.add(getField(b, 'VARIABLE'));
-      } else if (b.opcode === 'data_itemoflist' || b.opcode === 'data_lengthoflist' || b.opcode === 'data_listcontainsitem') {
+      } else if (b.opcode === 'data_itemoflist' || b.opcode === 'data_lengthoflist' || b.opcode === 'data_listcontainsitem' || b.opcode === 'data_itemnumoflist' || b.opcode === 'data_listcontents') {
         readsLists.add(getField(b, 'LIST'));
       } else if (b.opcode === 'data_setvariableto' || b.opcode === 'data_changevariableby') {
         writesVars.add(getField(b, 'VARIABLE'));
@@ -400,7 +406,7 @@ export class GpuKernelDetector {
     if (!b) return;
     if (b.opcode === 'data_variable') {
       result.readsVars.add(getField(b, 'VARIABLE'));
-    } else if (b.opcode === 'data_itemoflist' || b.opcode === 'data_lengthoflist' || b.opcode === 'data_listcontainsitem') {
+    } else if (b.opcode === 'data_itemoflist' || b.opcode === 'data_lengthoflist' || b.opcode === 'data_listcontainsitem' || b.opcode === 'data_itemnumoflist' || b.opcode === 'data_listcontents') {
       result.readsLists.add(getField(b, 'LIST'));
     }
     for (const key in b.inputs) {

@@ -58,6 +58,7 @@ class ShaderRenderer {
     this._computeAtlas = null;
     this._computeAtlasCompiled = null;
     this._postRenderHooks = [];
+    this._inputProvider = () => ({});
   }
 
   addPostRenderHook (fn) {
@@ -143,6 +144,18 @@ class ShaderRenderer {
       });
     }
     locations.listAtlas = this._buildListAtlasLocations(program, compiled.listTextures || []);
+    locations.uMouseX = compiled.needsMouse ? gl.getUniformLocation(program, 'u_mouse_x') : null;
+    locations.uMouseY = compiled.needsMouse ? gl.getUniformLocation(program, 'u_mouse_y') : null;
+    locations.uMouseDown = compiled.needsMouse ? gl.getUniformLocation(program, 'u_mouse_down') : null;
+    locations.uCounter = compiled.needsCounter ? gl.getUniformLocation(program, 'u_counter') : null;
+    locations.keys = [];
+    for (const k of compiled.keyUniforms || []) {
+      locations.keys.push({
+        key: k.key,
+        uniform: k.uniform,
+        loc: gl.getUniformLocation(program, k.uniform)
+      });
+    }
     return { program, locations };
   }
 
@@ -452,6 +465,7 @@ class ShaderRenderer {
       this._lastH = h;
     }
     gl.uniform1f(this._locations.uTime, this.getTime());
+    this._uploadInputUniforms(this._locations);
     this._refreshListDataIfChanged();
     const cache = this._readVariableCache();
     for (const v of this._locations.vars) {
@@ -651,6 +665,7 @@ class ShaderRenderer {
 
     gl.uniform2f(programInfo.locations.uResolution, width, height);
     gl.uniform1f(programInfo.locations.uTime, 0);
+    this._uploadInputUniforms(programInfo.locations);
 
     const variableCache = readVariable ? readVariable() : this._readVariableCache();
     for (const v of programInfo.locations.vars) {
@@ -700,6 +715,37 @@ class ShaderRenderer {
 
   setVariableCacheProvider (fn) {
     this._readVariableCache = fn || (() => ({}));
+  }
+
+  setInputProvider (fn) {
+    this._inputProvider = fn || (() => ({}));
+  }
+
+  _uploadInputUniforms (loc) {
+    const gl = this.gl;
+    if (!loc) return;
+    let input = null;
+    const getInput = () => {
+      if (!input) input = this._inputProvider();
+      return input;
+    };
+    if (loc.uMouseX != null) {
+      const i = getInput();
+      gl.uniform1f(loc.uMouseX, i.mouseX || 0);
+      gl.uniform1f(loc.uMouseY, i.mouseY || 0);
+      gl.uniform1f(loc.uMouseDown, i.mouseDown ? 1.0 : 0.0);
+    }
+    if (loc.uCounter != null) {
+      const i = getInput();
+      gl.uniform1f(loc.uCounter, i.counter || 0);
+    }
+    if (loc.keys && loc.keys.length) {
+      const i = getInput();
+      const keys = i.keys || {};
+      for (const k of loc.keys) {
+        gl.uniform1f(k.loc, keys[k.key] ? 1.0 : 0.0);
+      }
+    }
   }
 
   _destroyListTextures () {

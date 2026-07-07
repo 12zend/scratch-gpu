@@ -1,6 +1,7 @@
 const PIXEL_NAME = 'pixel';
 const MAX_LOOP = 256;
 const MAX_UNROLL = 128;
+const MAX_TEX_SIZE = 2048;
 const SUBSTACK_INPUTS = new Set(['SUBSTACK', 'SUBSTACK2', 'SUBSTACK3']);
 
 const sanitize = (logical, prefix) => {
@@ -55,6 +56,11 @@ export class ScratchShaderCompiler {
     this._listInitialLengths = new Map();
     this._globalMutableArrays = [];
     this._mutableReaderName = new Map();
+    this._needsMouse = false;
+    this._needsCounter = false;
+    this._keyUniforms = new Map();
+    this._mutableIndexOffFns = new Map();
+    this._readOnlyIndexOffFns = new Map();
   }
 
   _uid (logical, prefix) {
@@ -155,7 +161,10 @@ export class ScratchShaderCompiler {
       pixelArgNames: this._pixel.paramNames.slice(),
       kernelMode: this._kernelMode,
       warnings: this.warnings,
-      errors: this.errors
+      errors: this.errors,
+      needsMouse: this._needsMouse,
+      keyUniforms: Array.from(this._keyUniforms.entries()).map(([key, uniform]) => ({key, uniform})),
+      needsCounter: this._needsCounter
     };
   }
 
@@ -384,7 +393,7 @@ export class ScratchShaderCompiler {
           this._markUsage(this._getField(b, 'VARIABLE'), false, true);
         } else if (op === 'control_for_each') {
           this._markUsage(this._getField(b, 'VARIABLE'), false, true);
-        } else if (op === 'data_itemoflist' || op === 'data_lengthoflist' || op === 'data_listcontainsitem') {
+        } else if (op === 'data_itemoflist' || op === 'data_lengthoflist' || op === 'data_listcontainsitem' || op === 'data_itemnumoflist' || op === 'data_listcontents') {
           this._markListUsage(this._getField(b, 'LIST'), true, false);
         } else if (op === 'data_replaceitemoflist' || op === 'data_addtolist' || op === 'data_insertatlist' || op === 'data_deleteoflist' || op === 'data_deletealloflist') {
           this._markListUsage(this._getField(b, 'LIST'), false, true);
@@ -435,6 +444,19 @@ export class ScratchShaderCompiler {
     lines.push('');
     lines.push('uniform vec2 u_resolution;');
     lines.push('uniform float u_time;');
+    if (this._needsMouse) {
+      lines.push('uniform float u_mouse_x;');
+      lines.push('uniform float u_mouse_y;');
+      lines.push('uniform float u_mouse_down;');
+    }
+    if (this._needsCounter) {
+      lines.push('uniform float u_counter;');
+    }
+    if (this._keyUniforms.size) {
+      for (const [, uniformName] of this._keyUniforms) {
+        lines.push(`uniform float ${uniformName};`);
+      }
+    }
     const stageVars = this._stageVariableValues();
     for (const [name, usage] of this._varUsage) {
       if (name.toLowerCase() === 'color') continue;
@@ -484,6 +506,19 @@ export class ScratchShaderCompiler {
           lines.push(`  float y = sc_lmeta_${ti}.z + floor(i / sc_lmeta_${ti}.x) + 0.5;`);
           lines.push(`  return texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).${swiz};`);
           lines.push('}');
+          const iofn = `sc_lindexof_${ti}_${ci}`;
+          lines.push(`float ${iofn}(float item) {`);
+          lines.push(`  float len = sc_llen_${ti}.${swiz};`);
+          lines.push('  if (len <= 0.0) return 0.0;');
+          lines.push(`  for (int mi = 0; mi < ${MAX_TEX_SIZE}; mi++) {`);
+          lines.push('    if (float(mi) >= len) break;');
+          lines.push(`    float x = mod(float(mi), sc_lmeta_${ti}.x) + 0.5;`);
+          lines.push(`    float y = sc_lmeta_${ti}.z + floor(float(mi) / sc_lmeta_${ti}.x) + 0.5;`);
+          lines.push(`    float val = texture2D(sc_ltex, vec2(x * sc_ltex_size_inv.x, y * sc_ltex_size_inv.y)).${swiz};`);
+          lines.push('    if (abs(val - item) < 0.000001) return float(mi) + 1.0;');
+          lines.push('  }');
+          lines.push('  return 0.0;');
+          lines.push('}');
         }
       }
     }
@@ -512,6 +547,16 @@ export class ScratchShaderCompiler {
         lines.push(`  }`);
         lines.push(`  return result;`);
         lines.push(`}`);
+        const iofn = this._uid(name, 'sc_laindexof_');
+        this._mutableIndexOffFns.set(name, iofn);
+        lines.push(`float ${iofn}(float item) {`);
+        lines.push(`  if (${len} <= 0.0) return 0.0;`);
+        lines.push(`  for (int mi = 0; mi < ${cap}; mi++) {`);
+        lines.push(`    if (float(mi) >= ${len}) break;`);
+        lines.push(`    if (abs(${arr}[mi] - item) < 0.000001) return float(mi) + 1.0;`);
+        lines.push(`  }`);
+        lines.push(`  return 0.0;`);
+        lines.push(`}`);
         this._globalMutableArrays.push({ arr, len, cap });
       }
       lines.push('');
@@ -520,6 +565,13 @@ export class ScratchShaderCompiler {
     lines.push('  co = fract(co * 0.3183099 + vec3(0.71, 0.113, 0.419));');
     lines.push('  co += dot(co, co.yzx + 19.19);');
     lines.push('  return fract((co.x + co.y) * (co.y + co.z) * (co.z + co.x));');
+    lines.push('}');
+    lines.push('');
+    lines.push('float sc_tan(float angle) {');
+    lines.push('  float a = mod(angle, 360.0);');
+    lines.push('  if (abs(a - 90.0) < 1e-6) return 1e20;');
+    lines.push('  if (abs(a - 270.0) < 1e-6) return -1e20;');
+    lines.push('  return floor(tan(angle * 0.017453292519943295) * 1e10 + 0.5) / 1e10;');
     lines.push('}');
     lines.push('');
     const procOrder = this._topologicalOrder();
@@ -807,8 +859,17 @@ export class ScratchShaderCompiler {
       }
       case 'control_wait':
       case 'control_wait_until':
-      case 'control_all_at_once':
         this.warnings.push(`"${op}" is ignored in shader mode.`);
+        return `${ind}`;
+      case 'control_all_at_once': {
+        const body = this._substack(b, 'SUBSTACK', ind);
+        return `${ind}${body}`;
+      }
+      case 'control_clear_counter':
+        this.warnings.push('"clear counter" is not supported in shader mode (counter is CPU-side).');
+        return `${ind}`;
+      case 'control_incr_counter':
+        this.warnings.push('"incr counter" is not supported in shader mode (counter is CPU-side).');
         return `${ind}`;
       case 'data_replaceitemoflist': {
         const name = this._getField(b, 'LIST');
@@ -865,9 +926,58 @@ export class ScratchShaderCompiler {
           this.warnings.push(`"${op}" on read-only list "${name}" is ignored in shader mode.`);
           return `${ind}`;
         }
+        const arr = this._mutableArrayName(name);
         const len = this._mutableLenName(name);
-        // Simplification: delete the last item (Scratch supports index/all/last).
-        return `${ind}${len} = max(0.0, ${len} - 1.0);`;
+        const cap = this._mutableListSizes.get(name) || 64;
+        const indexBlock = b.inputs && b.inputs.INDEX && this._block(this._inputChild(b.inputs.INDEX));
+        const indexFieldValue = indexBlock && indexBlock.opcode === 'text'
+          ? this._getField(indexBlock, 'TEXT') : null;
+        if (indexFieldValue === 'all') {
+          return `${ind}${len} = 0.0;`;
+        }
+        if (indexFieldValue === 'last') {
+          return `${ind}${len} = max(0.0, ${len} - 1.0);`;
+        }
+        const iv = this._loopVar();
+        const carryVar = this._uid('del_carry_' + (this._loopCounter++), 'sc_t_');
+        const startedVar = this._uid('del_started_' + (this._loopCounter++), 'sc_b_');
+        if (indexFieldValue === 'random' || indexFieldValue === 'any') {
+          const rv = this._randCounter++;
+          return [
+            `${ind}float ${carryVar} = 0.0;`,
+            `${ind}bool ${startedVar} = false;`,
+            `${ind}float _randIdx = floor(sc_rand(vec3(gl_FragCoord.xy, u_time + ${rv}.0)) * ${len});`,
+            `${ind}for (int ${iv} = 0; ${iv} < ${cap}; ${iv}++) {`,
+            `${ind}  if (float(${iv}) >= ${len}) break;`,
+            `${ind}  if (${startedVar}) {`,
+            `${ind}    float _tmp = ${arr}[${iv}];`,
+            `${ind}    ${arr}[${iv}] = ${carryVar};`,
+            `${ind}    ${carryVar} = _tmp;`,
+            `${ind}  } else if (abs(float(${iv}) - _randIdx) < 0.5) {`,
+            `${ind}    ${carryVar} = ${arr}[${iv}];`,
+            `${ind}    ${startedVar} = true;`,
+            `${ind}  }`,
+            `${ind}}`,
+            `${ind}if (${startedVar}) ${len} = max(0.0, ${len} - 1.0);`
+          ].join('\n');
+        }
+        const idx = this._inputExpr(b, 'INDEX');
+        return [
+          `${ind}float ${carryVar} = 0.0;`,
+          `${ind}bool ${startedVar} = false;`,
+          `${ind}for (int ${iv} = 0; ${iv} < ${cap}; ${iv}++) {`,
+          `${ind}  if (float(${iv}) >= ${len}) break;`,
+          `${ind}  if (${startedVar}) {`,
+          `${ind}    float _tmp = ${arr}[${iv}];`,
+          `${ind}    ${arr}[${iv}] = ${carryVar};`,
+          `${ind}    ${carryVar} = _tmp;`,
+          `${ind}  } else if (float(${iv}) + 1.0 >= floor(${idx} + 0.5)) {`,
+          `${ind}    ${carryVar} = ${arr}[${iv}];`,
+          `${ind}    ${startedVar} = true;`,
+          `${ind}  }`,
+          `${ind}}`,
+          `${ind}if (${startedVar}) ${len} = max(0.0, ${len} - 1.0);`
+        ].join('\n');
       }
       case 'data_deletealloflist': {
         const name = this._getField(b, 'LIST');
@@ -878,9 +988,49 @@ export class ScratchShaderCompiler {
         const len = this._mutableLenName(name);
         return `${ind}${len} = 0.0;`;
       }
-      case 'data_insertatlist':
-        this.warnings.push(`"${op}" is not supported in shader mode (use add or replace).`);
-        return `${ind}`;
+      case 'data_insertatlist': {
+        const name = this._getField(b, 'LIST');
+        if (!this._isMutableList(name)) {
+          this.warnings.push(`"${op}" on read-only list "${name}" is ignored in shader mode.`);
+          return `${ind}`;
+        }
+        const arr = this._mutableArrayName(name);
+        const len = this._mutableLenName(name);
+        const cap = this._mutableListSizes.get(name) || 64;
+        const idx = this._inputExpr(b, 'INDEX');
+        const val = this._inputExpr(b, 'ITEM');
+        const iv = this._loopVar();
+        const carryVar = this._uid('ins_carry_' + (this._loopCounter++), 'sc_t_');
+        const startedVar = this._uid('ins_started_' + (this._loopCounter++), 'sc_b_');
+        const origLenVar = this._uid('ins_origlen_' + (this._loopCounter++), 'sc_t_');
+        return [
+          `${ind}float ${origLenVar} = ${len};`,
+          `${ind}if (${len} < float(${cap}) && ${idx} >= 1.0 && ${idx} <= ${origLenVar} + 1.0) {`,
+          `${ind}  float ${carryVar} = ${val};`,
+          `${ind}  bool ${startedVar} = false;`,
+          `${ind}  for (int ${iv} = 0; ${iv} < ${cap}; ${iv}++) {`,
+          `${ind}    if (float(${iv}) >= ${origLenVar}) {`,
+          `${ind}      if (!${startedVar}) {`,
+          `${ind}        ${arr}[${iv}] = ${carryVar};`,
+          `${ind}        ${len} = ${len} + 1.0;`,
+          `${ind}      }`,
+          `${ind}      break;`,
+          `${ind}    }`,
+          `${ind}    if (${startedVar}) {`,
+          `${ind}      float _tmp = ${arr}[${iv}];`,
+          `${ind}      ${arr}[${iv}] = ${carryVar};`,
+          `${ind}      ${carryVar} = _tmp;`,
+          `${ind}    } else if (float(${iv}) + 1.0 >= floor(${idx} + 0.5)) {`,
+          `${ind}      float _tmp = ${arr}[${iv}];`,
+          `${ind}      ${arr}[${iv}] = ${carryVar};`,
+          `${ind}      ${carryVar} = _tmp;`,
+          `${ind}      ${startedVar} = true;`,
+          `${ind}      ${len} = ${len} + 1.0;`,
+          `${ind}    }`,
+          `${ind}  }`,
+          `${ind}}`
+        ].join('\n');
+      }
       default:
         if (op && (op.startsWith('pen_') || op.startsWith('motion_') || op.startsWith('looks_') || op.startsWith('sound_') || op.startsWith('event_') || op.startsWith('sensing_') || op.startsWith('data_') || op.startsWith('control_'))) {
           this.warnings.push(`"${op}" is ignored in shader mode.`);
@@ -967,6 +1117,71 @@ export class ScratchShaderCompiler {
     return null;
   }
 
+  _constFoldString (blockId) {
+    if (!blockId) return null;
+    const b = this._block(blockId);
+    if (!b) return null;
+    const op = b.opcode;
+    if (op === 'text') {
+      const t = this._getField(b, 'TEXT');
+      return t == null ? '' : String(t);
+    }
+    if (['math_number', 'math_positive_number', 'math_whole_number', 'math_integer', 'math_angle'].includes(op)) {
+      return String(parseNum(this._getField(b, 'NUM')));
+    }
+    if (op === 'operator_join') {
+      const left = this._constFoldString(this._inputChild(b.inputs.STRING1));
+      const right = this._constFoldString(this._inputChild(b.inputs.STRING2));
+      if (left !== null && right !== null) return left + right;
+      return null;
+    }
+    if (op === 'operator_letter_of') {
+      const str = this._constFoldString(this._inputChild(b.inputs.STRING));
+      const letterLit = this._literalValue(b, 'LETTER');
+      if (str !== null && letterLit !== null) {
+        const idx = Math.floor(letterLit);
+        if (idx >= 1 && idx <= str.length) return str[idx - 1];
+        return '';
+      }
+      return null;
+    }
+    if (op === 'data_variable') {
+      const name = this._getField(b, 'VARIABLE');
+      const vals = this._stageVariableValues();
+      if (vals.has(name)) {
+        const v = vals.get(name);
+        return v == null ? '' : String(v);
+      }
+      return null;
+    }
+    return null;
+  }
+
+  _evalMathop (which, n) {
+    switch (which) {
+      case 'abs': return Math.abs(n);
+      case 'floor': return Math.floor(n);
+      case 'ceiling': return Math.ceil(n);
+      case 'sqrt': return n < 0 ? 0 : Math.sqrt(n);
+      case 'sin': return Math.round(Math.sin(n * Math.PI / 180) * 1e10) / 1e10;
+      case 'cos': return Math.round(Math.cos(n * Math.PI / 180) * 1e10) / 1e10;
+      case 'tan': {
+        const m = n % 360;
+        if (m === 90 || m === -270) return Infinity;
+        if (m === -90 || m === 270) return -Infinity;
+        return Math.round(Math.tan(n * Math.PI / 180) * 1e10) / 1e10;
+      }
+      case 'asin': return Math.asin(Math.max(-1, Math.min(1, n))) * 180 / Math.PI;
+      case 'acos': return Math.acos(Math.max(-1, Math.min(1, n))) * 180 / Math.PI;
+      case 'atan': return Math.atan(n) * 180 / Math.PI;
+      case 'ln': return n <= 0 ? 0 : Math.log(n);
+      case 'log': return n <= 0 ? 0 : Math.log(n) / Math.LN10;
+      case 'e ^': return Math.exp(n);
+      case '10 ^': return Math.pow(10, n);
+      default: return null;
+    }
+  }
+
   _inputExpr (block, inputName) {
     const input = block.inputs && block.inputs[inputName];
     const childId = this._inputChild(input);
@@ -986,12 +1201,30 @@ export class ScratchShaderCompiler {
     }
     const op = b.opcode;
     switch (op) {
-      case 'operator_lt':
+      case 'operator_lt': {
+        const s1 = this._constFoldString(this._inputChild(b.inputs.OPERAND1));
+        const s2 = this._constFoldString(this._inputChild(b.inputs.OPERAND2));
+        if (s1 !== null && s2 !== null) {
+          return s1.toLowerCase() < s2.toLowerCase() ? '(true)' : '(false)';
+        }
         return `(${this._inputExpr(b, 'OPERAND1')} < ${this._inputExpr(b, 'OPERAND2')})`;
-      case 'operator_gt':
+      }
+      case 'operator_gt': {
+        const s1 = this._constFoldString(this._inputChild(b.inputs.OPERAND1));
+        const s2 = this._constFoldString(this._inputChild(b.inputs.OPERAND2));
+        if (s1 !== null && s2 !== null) {
+          return s1.toLowerCase() > s2.toLowerCase() ? '(true)' : '(false)';
+        }
         return `(${this._inputExpr(b, 'OPERAND1')} > ${this._inputExpr(b, 'OPERAND2')})`;
-      case 'operator_equals':
+      }
+      case 'operator_equals': {
+        const s1 = this._constFoldString(this._inputChild(b.inputs.OPERAND1));
+        const s2 = this._constFoldString(this._inputChild(b.inputs.OPERAND2));
+        if (s1 !== null && s2 !== null) {
+          return s1.toLowerCase() === s2.toLowerCase() ? '(true)' : '(false)';
+        }
         return `(abs(${this._inputExpr(b, 'OPERAND1')} - ${this._inputExpr(b, 'OPERAND2')}) < 0.000001)`;
+      }
       case 'operator_and':
         return `(${this._condExpr(b, 'OPERAND1')} && ${this._condExpr(b, 'OPERAND2')})`;
       case 'operator_or':
@@ -1025,6 +1258,33 @@ export class ScratchShaderCompiler {
       }
       case 'sensing_timer':
         return 'u_time';
+      case 'sensing_mousex':
+        this._needsMouse = true;
+        return 'u_mouse_x';
+      case 'sensing_mousey':
+        this._needsMouse = true;
+        return 'u_mouse_y';
+      case 'sensing_mousedown':
+        this._needsMouse = true;
+        return 'u_mouse_down';
+      case 'sensing_keypressed': {
+        this._needsMouse = true;
+        const keyField = b.fields && b.fields.KEY_OPTION;
+        const keyName = keyField ? String(keyField.value).toLowerCase() : '';
+        if (!keyName) {
+          this.warnings.push('sensing_keypressed without key option; returning 0.');
+          return '0.0';
+        }
+        let uniformName = this._keyUniforms.get(keyName);
+        if (!uniformName) {
+          uniformName = this._uid(keyName, 'u_key_');
+          this._keyUniforms.set(keyName, uniformName);
+        }
+        return uniformName;
+      }
+      case 'control_get_counter':
+        this._needsCounter = true;
+        return 'u_counter';
       case 'argument_reporter_string_number':
       case 'argument_reporter_boolean': {
         const name = String(this._getField(b, 'VALUE'));
@@ -1067,7 +1327,7 @@ export class ScratchShaderCompiler {
         if (bLit !== null && bLit !== 0) {
           return `(${a} / ${d})`;
         }
-        return `((${d} == 0.0) ? 1e20 : (${a} / ${d}))`;
+        return `((${d} == 0.0) ? ((${a} > 0.0) ? 1e20 : ((${a} < 0.0) ? -1e20 : 0.0)) : (${a} / ${d}))`;
       }
       case 'operator_mod': {
         const a = this._inputExpr(b, 'NUM1');
@@ -1082,20 +1342,28 @@ export class ScratchShaderCompiler {
         return `floor(${this._inputExpr(b, 'NUM')} + 0.5)`;
       case 'operator_mathop': {
         const which = String(this._getField(b, 'OPERATOR') || '').toLowerCase();
+        const nLit = this._literalValue(b, 'NUM');
+        if (nLit !== null) {
+          const r = this._evalMathop(which, nLit);
+          if (r !== null) {
+            if (!isFinite(r)) return r > 0 ? '1e20' : '-1e20';
+            return glslNum(r);
+          }
+        }
         const n = this._inputExpr(b, 'NUM');
         switch (which) {
           case 'abs': return `abs(${n})`;
           case 'floor': return `floor(${n})`;
           case 'ceiling': return `ceil(${n})`;
-          case 'sqrt': return `sqrt(${n})`;
-          case 'sin': return `sin((${n}) * 0.017453292519943295)`;
-          case 'cos': return `cos((${n}) * 0.017453292519943295)`;
-          case 'tan': return `tan((${n}) * 0.017453292519943295)`;
-          case 'asin': return `asin(${n}) * 57.29577951308232`;
-          case 'acos': return `acos(${n}) * 57.29577951308232`;
-          case 'atan': return `atan(${n}) * 57.29577951308232`;
-          case 'ln': return `log(${n})`;
-          case 'log': return `log(${n}) / 2.302585092994046`;
+          case 'sqrt': return `((${n} < 0.0) ? 0.0 : sqrt(${n}))`;
+          case 'sin': return `(floor(sin((${n}) * 0.017453292519943295) * 1e10 + 0.5) / 1e10)`;
+          case 'cos': return `(floor(cos((${n}) * 0.017453292519943295) * 1e10 + 0.5) / 1e10)`;
+          case 'tan': return `sc_tan(${n})`;
+          case 'asin': return `(asin(clamp(${n}, -1.0, 1.0)) * 57.29577951308232)`;
+          case 'acos': return `(acos(clamp(${n}, -1.0, 1.0)) * 57.29577951308232)`;
+          case 'atan': return `(atan(${n}) * 57.29577951308232)`;
+          case 'ln': return `((${n} <= 0.0) ? 0.0 : log(${n}))`;
+          case 'log': return `((${n} <= 0.0) ? 0.0 : (log(${n}) / 2.302585092994046))`;
           case 'e ^': return `exp(${n})`;
           case '10 ^': return `pow(10.0, ${n})`;
           default:
@@ -1113,12 +1381,30 @@ export class ScratchShaderCompiler {
         const seed = this._randCounter++;
         return `mix(${a}, ${bb}, sc_rand(vec3(gl_FragCoord.xy, u_time + ${seed}.0)))`;
       }
-      case 'operator_lt':
+      case 'operator_lt': {
+        const s1 = this._constFoldString(this._inputChild(b.inputs.OPERAND1));
+        const s2 = this._constFoldString(this._inputChild(b.inputs.OPERAND2));
+        if (s1 !== null && s2 !== null) {
+          return s1.toLowerCase() < s2.toLowerCase() ? '1.0' : '0.0';
+        }
         return `((${this._inputExpr(b, 'OPERAND1')} < ${this._inputExpr(b, 'OPERAND2')}) ? 1.0 : 0.0)`;
-      case 'operator_gt':
+      }
+      case 'operator_gt': {
+        const s1 = this._constFoldString(this._inputChild(b.inputs.OPERAND1));
+        const s2 = this._constFoldString(this._inputChild(b.inputs.OPERAND2));
+        if (s1 !== null && s2 !== null) {
+          return s1.toLowerCase() > s2.toLowerCase() ? '1.0' : '0.0';
+        }
         return `((${this._inputExpr(b, 'OPERAND1')} > ${this._inputExpr(b, 'OPERAND2')}) ? 1.0 : 0.0)`;
-      case 'operator_equals':
+      }
+      case 'operator_equals': {
+        const s1 = this._constFoldString(this._inputChild(b.inputs.OPERAND1));
+        const s2 = this._constFoldString(this._inputChild(b.inputs.OPERAND2));
+        if (s1 !== null && s2 !== null) {
+          return s1.toLowerCase() === s2.toLowerCase() ? '1.0' : '0.0';
+        }
         return `((abs(${this._inputExpr(b, 'OPERAND1')} - ${this._inputExpr(b, 'OPERAND2')}) < 0.000001) ? 1.0 : 0.0)`;
+      }
       case 'operator_and':
         return `((${this._inputExpr(b, 'OPERAND1')} != 0.0 && ${this._inputExpr(b, 'OPERAND2')} != 0.0) ? 1.0 : 0.0)`;
       case 'operator_or':
@@ -1165,6 +1451,83 @@ export class ScratchShaderCompiler {
         const swiz = ['x', 'y', 'z', 'w'][slot.channel];
         return `sc_llen_${slot.texIndex}.${swiz}`;
       }
+      case 'operator_join': {
+        const left = this._constFoldString(this._inputChild(b.inputs.STRING1));
+        const right = this._constFoldString(this._inputChild(b.inputs.STRING2));
+        if (left !== null && right !== null) {
+          const joined = left + right;
+          const n = parseFloat(joined);
+          return isFinite(n) ? glslNum(n) : '0.0';
+        }
+        this.warnings.push('Dynamic "join" is not supported in shader mode; result is 0.');
+        return '0.0';
+      }
+      case 'operator_length': {
+        const str = this._constFoldString(this._inputChild(b.inputs.STRING));
+        if (str !== null) return glslNum(str.length);
+        this.warnings.push('Dynamic "length of" is not supported in shader mode; result is 0.');
+        return '0.0';
+      }
+      case 'operator_letter_of': {
+        const str = this._constFoldString(this._inputChild(b.inputs.STRING));
+        const letterLit = this._literalValue(b, 'LETTER');
+        if (str !== null && letterLit !== null) {
+          const idx = Math.floor(letterLit);
+          if (idx >= 1 && idx <= str.length) {
+            const ch = str[idx - 1];
+            const n = parseFloat(ch);
+            return isFinite(n) ? glslNum(n) : '0.0';
+          }
+          return '0.0';
+        }
+        this.warnings.push('Dynamic "letter of" is not supported in shader mode; result is 0.');
+        return '0.0';
+      }
+      case 'operator_contains': {
+        const str = this._constFoldString(this._inputChild(b.inputs.STRING1));
+        const sub = this._constFoldString(this._inputChild(b.inputs.STRING2));
+        if (str !== null && sub !== null) {
+          return str.toLowerCase().indexOf(sub.toLowerCase()) !== -1 ? '1.0' : '0.0';
+        }
+        this.warnings.push('Dynamic "contains" is not supported in shader mode; result is 0.');
+        return '0.0';
+      }
+      case 'data_itemnumoflist': {
+        const name = this._getField(b, 'LIST');
+        const item = this._inputExpr(b, 'ITEM');
+        if (this._isMutableList(name)) {
+          const fn = this._mutableIndexOffFns.get(name);
+          if (!fn) return '0.0';
+          return `${fn}(${item})`;
+        }
+        const slot = this._listSlot.get(name);
+        if (!slot) {
+          this.warnings.push(`List "${name}" not found; returning 0.`);
+          return '0.0';
+        }
+        return `sc_lindexof_${slot.texIndex}_${slot.channel}(${item})`;
+      }
+      case 'data_listcontainsitem': {
+        const name = this._getField(b, 'LIST');
+        const item = this._inputExpr(b, 'ITEM');
+        let idxExpr;
+        if (this._isMutableList(name)) {
+          const fn = this._mutableIndexOffFns.get(name);
+          if (!fn) return '0.0';
+          idxExpr = `${fn}(${item})`;
+        } else {
+          const slot = this._listSlot.get(name);
+          if (!slot) {
+            this.warnings.push(`List "${name}" not found; returning 0.`);
+            return '0.0';
+          }
+          idxExpr = `sc_lindexof_${slot.texIndex}_${slot.channel}(${item})`;
+        }
+        return `((${idxExpr} > 0.0) ? 1.0 : 0.0)`;
+      }
+      case 'data_listcontents':
+        this.warnings.push('"list contents" is not supported in shader mode; returning 0.');
+        return '0.0';
       default:
         if (op && op.startsWith('data_')) {
           this.warnings.push(`Unsupported data reporter treated as 0: ${op}`);

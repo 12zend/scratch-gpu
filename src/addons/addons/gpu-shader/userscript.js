@@ -226,6 +226,37 @@ export default async function ({addon, console}) {
     return cache;
   };
 
+  const buildInputCache = () => {
+    const io = vm && vm.runtime && vm.runtime.ioDevices;
+    const input = {};
+    if (io && io.mouse) {
+      input.mouseX = io.mouse.getScratchX();
+      input.mouseY = io.mouse.getScratchY();
+      input.mouseDown = io.mouse.getIsDown();
+    }
+    if (vm && vm.runtime && vm.runtime.ext_scratch3_control) {
+      input.counter = vm.runtime.ext_scratch3_control._counter || 0;
+    }
+    const keySet = new Set();
+    const addKeys = (compiled) => {
+      if (compiled && compiled.keyUniforms) {
+        for (const k of compiled.keyUniforms) keySet.add(k.key);
+      }
+    };
+    if (shaderRenderer) addKeys(shaderRenderer._compiled);
+    if (kernelScheduler && kernelScheduler.kernels) {
+      for (const entry of kernelScheduler.kernels) addKeys(entry.compiled);
+    }
+    if (keySet.size && io && io.keyboard && typeof io.keyboard.getKeyIsDown === 'function') {
+      const keys = {};
+      for (const key of keySet) {
+        keys[key] = io.keyboard.getKeyIsDown(key);
+      }
+      input.keys = keys;
+    }
+    return input;
+  };
+
   // --- CPU procedure skip / restore ---
   // Instead of mutating the block tree (b.next = null) which disconnects
   // procedure bodies in the editor, we override getProcedureDefinition on
@@ -388,6 +419,7 @@ export default async function ({addon, console}) {
       }
       shaderRenderer.setVariableCacheProvider(() => buildVariableCache());
       shaderRenderer.setListReader((name) => readShaderList(name));
+      shaderRenderer.setInputProvider(() => buildInputCache());
       shaderRenderer.uploadListData();
       const stageW = (runtime.constructor.STAGE_WIDTH) || 480;
       const stageH = (runtime.constructor.STAGE_HEIGHT) || 360;
