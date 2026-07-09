@@ -77,6 +77,9 @@ export default async function ({addon, console}) {
   let _ownPenSkinId = -1;
   let _ownPenDrawableId = -1;
   let _blitTexture = null;
+  let _blitTextureW = 0;
+  let _blitTextureH = 0;
+  let _blitTexParamsSet = false;
 
   const penExtensionLoaded = () => {
     const ext = vm && vm.extensionManager;
@@ -134,6 +137,9 @@ export default async function ({addon, console}) {
     _ownPenDrawableId = -1;
     _ownPenSkinId = -1;
     _blitTexture = null;
+    _blitTextureW = 0;
+    _blitTextureH = 0;
+    _blitTexParamsSet = false;
   };
 
   const blitToPenLayer = () => {
@@ -145,23 +151,39 @@ export default async function ({addon, console}) {
     if (!skin || typeof skin._drawPenTexture !== 'function') return;
 
     const gl = renderer.gl;
-    if (_blitTexture == null) _blitTexture = gl.createTexture();
+    if (_blitTexture == null) {
+      _blitTexture = gl.createTexture();
+      _blitTexParamsSet = false;
+    }
     if (_blitTexture == null) return;
 
     skin.clear();
     renderer.dirty = true;
 
+    const w = shaderCanvas.width;
+    const h = shaderCanvas.height;
+
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, _blitTexture);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     try {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, shaderCanvas);
+      if (w === _blitTextureW && h === _blitTextureH) {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, shaderCanvas);
+      } else {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, shaderCanvas);
+        _blitTextureW = w;
+        _blitTextureH = h;
+        _blitTexParamsSet = false;
+      }
     } catch (e) {
       console.error('[gpu-shader] blit texImage2D error:', e && e.message || e);
       return;
     }
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    if (!_blitTexParamsSet) {
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      _blitTexParamsSet = true;
+    }
 
     try {
       skin._drawPenTexture(_blitTexture);
