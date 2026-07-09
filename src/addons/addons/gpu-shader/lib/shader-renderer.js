@@ -401,8 +401,14 @@ class ShaderRenderer {
   resize (width, height) {
     const w = Math.max(1, Math.floor(width));
     const h = Math.max(1, Math.floor(height));
-    if (this.canvas.width !== w) this.canvas.width = w;
-    if (this.canvas.height !== h) this.canvas.height = h;
+    if (this.canvas.width !== w) {
+      this.canvas.width = w;
+      this._glStateReady = false;
+    }
+    if (this.canvas.height !== h) {
+      this.canvas.height = h;
+      this._glStateReady = false;
+    }
     this.gl.viewport(0, 0, w, h);
   }
 

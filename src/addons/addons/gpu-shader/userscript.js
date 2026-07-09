@@ -90,7 +90,18 @@ export default async function ({addon, console}) {
     if (penExtensionLoaded()) {
       const sid = renderer._penSkinId;
       if (sid != null && sid >= 0 && renderer._allSkins && renderer._allSkins[sid]) return sid;
-      return -1;
+      // The pen extension creates its skin lazily on the first pen operation
+      // (e.g. "erase all"). If no pen block has run yet, force-create it via
+      // the extension's own _getPenLayerID so we share the same skin/drawable
+      // instead of creating a conflicting second pen-layer drawable.
+      const penExt = vm.runtime.ext_scratch3_pen;
+      if (penExt && typeof penExt._getPenLayerID === 'function') {
+        try {
+          const forced = penExt._getPenLayerID();
+          if (forced >= 0) return forced;
+        } catch (e) {}
+      }
+      // Fall through to create our own skin if the pen ext is unavailable.
     }
 
     if (_ownPenSkinId >= 0 && renderer._allSkins && renderer._allSkins[_ownPenSkinId]) {
@@ -529,6 +540,10 @@ export default async function ({addon, console}) {
     if (!shaderRenderer || !shaderEnabled || !screenOnDemand) return;
     const width = Math.max(1, Math.min(MAX_RENDER_SIZE, Math.round(w)));
     const height = Math.max(1, Math.min(MAX_RENDER_SIZE, Math.round(h)));
+    // Ensure the pen skin exists before rendering so pixel(w, h) is
+    // self-contained — the user does not need to call "erase all" first.
+    // The blit (post-render hook) clears the skin and draws the new frame.
+    ensurePenSkinId();
     try {
       shaderRenderer.resize(width, height);
       shaderRenderer.render();
