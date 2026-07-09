@@ -85,10 +85,12 @@ CI (`.github/workflows/node.js.yml`) runs `npm ci`, `npm run build`, then
 Before pushing, run at least `npm run test:lint && npm run test:unit` locally.
 
 No GPU-specific test suite exists yet. When touching `gpu-shader`, manually test
-in a browser (`npm start`), open the editor, load a project with a `pixel(x, y)`
-screen kernel or a `gpu_<list>` compute kernel, press the green flag, and watch
-the console (logs are prefixed `[gpu-shader]`, `[scaffolding-shader]`, or
-`[gpu-kernel-scheduler]`). `window._gpuShaderDebug` exposes `shaderRenderer`,
+in a browser (`npm start`), open the editor, load a project with a `pixel(w, h)`
+screen kernel (e.g. `forever { erase all; pixel(480, 360) }` — each call renders
+one frame on the GPU) or a `gpu_<list>` compute kernel, press the green flag, and
+watch the console (logs are prefixed `[gpu-shader]`, `[scaffolding-shader]`, or
+`[gpu-kernel-scheduler]`; the enable log prints `(on-demand: true)` for a
+user-defined `pixel`). `window._gpuShaderDebug` exposes `shaderRenderer`,
 `kernelScheduler`, `shaderEnabled`, `tryEnableShader`, `disableShader`, and
 `refreshShaderLists` for live debugging.
 
@@ -108,7 +110,19 @@ block tree and returns `kernels` of two `type`s, plus a `renderPattern`:
    parameters, **or** any procedure that writes a variable named `color`. The
    procedure is compiled to a fragment shader that writes every stage pixel in
    parallel. Output goes to an overlay canvas attached via
-   `vm.renderer.addOverlay(shaderCanvas, 'none')`.
+   `vm.renderer.addOverlay(shaderCanvas, 'none')` (kept invisible; the visible
+   image is blitted into the Scratch pen layer every render).
+
+   A **user-defined** `pixel` block runs **on demand**: it is registered as a
+   Scratch Addons *addon block* (`runtime.addAddonBlock`) so each CPU call
+   `pixel(w, h)` routes into a callback (the body is NOT executed on the CPU)
+   that fires one GPU render pass at resolution `w × h` and blits it to the pen
+   layer. There is no continuous RAF loop in this mode — the user controls
+   render frequency and resolution from their own script (e.g.
+   `forever { erase all; pixel(480, 360) }`).
+
+   A **render-pattern-synthesized** `pixel` (see #3) has no explicit caller, so
+   it keeps the old continuous RAF behaviour (render every frame).
 
 2. **Compute kernels** — any custom block whose label starts with `gpu_`
    (e.g. `gpu_<listname>`). The body must use only the opcodes in the `safe`
@@ -157,11 +171,15 @@ overlay canvas. Highlights:
 - Single fullscreen-quad vertex shader `VERT_SRC`; everything interesting is in
   the fragment shader.
 - **Screen render path:** `setProgram(compiled, readVariable)` links a program,
-  caches uniform locations in `_locations`, uploads a list-data atlas texture
-  (`uploadListData`), and starts a RAF loop (`start`/`_frame`/`stop`) that
-  re-uploads changed uniforms and draws every frame. `u_time` uses
+  caches uniform locations in `_locations`, and uploads a list-data atlas
+  texture (`uploadListData`). For a render-pattern-synthesized kernel it
+  starts a RAF loop (`start`/`_frame`/`stop`) that re-uploads changed
+  uniforms and draws every frame. For a user-defined `pixel(w, h)` kernel
+  there is no RAF loop: `triggerOnDemandRender` calls `shaderRenderer.render()`
+  once per CPU call (resizing the canvas to `w × h` first), and the
+  post-render hook blits the result to the pen layer. `u_time` uses
   `performance.now()`; `pauseTime`/`resumeTime` keep it from jumping across a
-  pause.
+  pause (applied in both modes).
 - **Compute path:** `runComputePass(compiled, w, h, readVariable, readList)`
   renders into an FBO with a float texture (when `OES_texture_float` +
   `WEBGL_color_buffer_float` are available) or an RGBA8 texture packed 24-bit
@@ -188,8 +206,11 @@ scheduler calls `_restoreCpuCallback(proccode)` (which is
 ### Skipping CPU execution
 
 To actually accelerate anything, the CPU interpreter/compiled path must **not**
-run the GPUized procedures. The mechanism (in `userscript.js`) is critical and
-subtle — read the comment block there before touching it:
+run the GPUized procedures. There are two distinct mechanisms (both in
+`userscript.js`) — read the comment blocks there before touching either:
+
+**Compute kernels & render-pattern loops** use the `getProcedureDefinition`
+override:
 
 - We override `blocks.getProcedureDefinition(name)` on each target's `Blocks`
   instance so that skipped proccodes resolve to `null`. Both the interpreter
@@ -203,9 +224,21 @@ subtle — read the comment block there before touching it:
   `target.blocks._cache.compiledScripts/compiledProcedures` so the compiler
   re-jits without the NOP'd procedures.
 - `userscript.js` also walks every `procedures_definition` and adds to the skip
-  set any procedure whose body directly calls a kernel proccode. **This is
-  mandatory**: without it the CPU still enters a 480×360 = 172800-iteration loop
-  calling the now-NOP'd `pixel(x,y)` every frame (see commit `9ad53ff`).
+  set any procedure whose body directly calls a skipped kernel proccode. This
+  stops the CPU entering a 480×360 = 172800-iteration loop calling a now-NOP'd
+  render-pattern helper every frame (see commit `9ad53ff`).
+
+**The user-defined `pixel` screen kernel does NOT use the skip set.** Instead it
+is registered via `runtime.addAddonBlock` (`registerPixelAddonBlock`). Both the
+interpreter (`scratch3_procedures.call`) and the compiler (`irgen getProcedureInfo`
+→ `StackOpcode.ADDON_CALL`) consult `runtime.getAddonBlock(proccode)` *before*
+running a procedure's body, so a CPU call to `pixel(w, h)` dispatches into our
+callback (which fires one GPU render pass at `w × h`) and never executes the
+slow per-pixel body. Because the pixel proccode is a real, dispatching call,
+procedures that call `pixel` must NOT be added to the skip set (only
+render-pattern loops and `gpu_*` compute kernels are). The addon block is
+unregistered on `PROJECT_RUN_STOP` / `disableShader` so the editor stays
+interactive while stopped, and re-registered on the next green flag.
 
 ### Lifecycle (the brittle part — most performance bugs live here)
 
@@ -216,10 +249,10 @@ in lockstep with the VM clock. `userscript.js` listens on `vm.runtime`:
 |-------|--------|
 | `PROJECT_LOADED`    | set `shadersDirty = true` |
 | `PROJECT_CHANGED`   | set `shadersDirty = true` (recompile on next green flag) |
-| `PROJECT_START`     | if dirty: `tryEnableShader()`; else: `shaderRenderer.start()` + `kernelScheduler.start()`. Always start list refresh. |
-| `PROJECT_RUN_STOP`  | `shaderRenderer.stop()`, `kernelScheduler.stop()`, restore CPU procedures, set dirty (re-detect on next start — see `5cb5e32`). |
-| `RUNTIME_PAUSED`    | stop both RAF loops, `shaderRenderer.pauseTime()` |
-| `RUNTIME_UNPAUSED`  | resume RAF loops (only if they were running), `shaderRenderer.resumeTime()` |
+| `PROJECT_START`     | if dirty: `tryEnableShader()`; else: `shaderRenderer.resetTime()` + (continuous only) `shaderRenderer.start()` + `kernelScheduler.start()`. Always start list refresh. |
+| `PROJECT_RUN_STOP`  | `shaderRenderer.stop()`, (on-demand) `unregisterPixelAddonBlock()`, `kernelScheduler.stop()`, restore CPU procedures, set dirty (re-detect on next start — see `5cb5e32`). |
+| `RUNTIME_PAUSED`    | stop continuous screen RAF + scheduler RAF, `shaderRenderer.pauseTime()` (always, incl. on-demand so `u_time` does not jump). |
+| `RUNTIME_UNPAUSED`  | `shaderRenderer.resumeTime()` (always), resume continuous screen RAF + scheduler RAF (only if they were running). |
 
 Design rules enforced by recent commits (don't regress them):
 
@@ -228,24 +261,33 @@ Design rules enforced by recent commits (don't regress them):
 - Shaders are **kept alive across stop/start cycles** and only recompiled when
   `PROJECT_CHANGED` flips `shadersDirty`, OR on `PROJECT_RUN_STOP` (which sets
   dirty because block edits during stop must be picked up — see `5cb5e32`).
-- On `PROJECT_RUN_STOP`, CPU procedures are restored so the editor stays
-  interactive while stopped (`d5ec852`).
+- On `PROJECT_RUN_STOP`, CPU procedures are restored (and the on-demand
+  `pixel` addon block is unregistered) so the editor stays interactive while
+  stopped (`d5ec852`).
+- The user-defined `pixel(w, h)` screen kernel is **on-demand**: it renders one
+  frame per CPU call (via a registered addon block) at the caller's resolution,
+  not on a continuous RAF loop. The addon block is unregistered on stop and
+  re-registered on the next green flag's `tryEnableShader`.
 - Both RAF loops are stopped on pause to avoid the shader's `u_time` advancing
   and compute kernels racing paused CPU threads (`9f4ff74`).
 - `runComputePass` caches the compiled program + list atlas to avoid
   recompiling every frame (`1da5c05`).
 
 `window._gpuShaderDebug.tryEnableShader()` is the single entry point that
-detects, compiles, attaches the overlay, starts both loops, and installs the CPU
-skip set. `disableShader()` is its inverse. `tryEnableShader` is idempotent and
-safe to call repeatedly.
+detects, compiles, attaches the overlay, registers the on-demand `pixel` addon
+block (or starts the continuous screen RAF for render-pattern kernels), starts
+the compute scheduler, and installs the CPU skip set. `disableShader()` is its
+inverse. `tryEnableShader` is idempotent and safe to call repeatedly.
 
 ### Settings
 
 Manifest-defined settings (`addon.settings.get`):
 
 - `shader_scale` (`1` default, also `0.5`, `2`): multiplies the stage
-  dimensions for the shader canvas. Changing it triggers a `shaderRenderer.resize`.
+  dimensions for the shader canvas in **continuous** (render-pattern) mode.
+  Changing it triggers a `shaderRenderer.resize`. In **on-demand** mode the
+  canvas is resized per `pixel(w, h)` call, so `shader_scale` is ignored (the
+  user picks the resolution explicitly).
 - `shader_on_top` (boolean, default `true`): currently only toggles a flag;
   visual stacking is handled by `scratch-render`'s overlay order.
 

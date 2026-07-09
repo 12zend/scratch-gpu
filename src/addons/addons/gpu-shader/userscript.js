@@ -57,6 +57,10 @@ export default async function ({addon, console}) {
   let listDataCache = null;
   let shaderListRefreshTimer = null;
   let shadersDirty = false;
+  // When true, the screen shader renders one frame per CPU call to pixel(w, h)
+  // (via a registered addon block) instead of running a continuous RAF loop.
+  let screenOnDemand = false;
+  let _registeredAddonProccode = null;
 
   // --- pen-layer integration ---
   // The screen shader is NOT rendered as a topmost overlay. Instead, every
@@ -508,6 +512,62 @@ export default async function ({addon, console}) {
     shaderListRefreshTimer = setTimeout(tick, 250);
   };
 
+  // --- on-demand screen rendering ---
+  // When the screen kernel is a user-defined pixel(w, h) block (not a
+  // render-pattern-synthesized one), we register it as a Scratch Addons
+  // "addon block" via runtime.addAddonBlock. Both the interpreter
+  // (scratch3_procedures.call) and the compiler (irgen getProcedureInfo)
+  // consult runtime.getAddonBlock() before running a procedure's body, so
+  // each CPU call to pixel(w, h) routes into our callback instead of
+  // executing the (slow, per-pixel) block body. The callback fires a single
+  // GPU render pass at the requested resolution and blits the result into the
+  // Scratch pen layer. The continuous RAF loop is only used for
+  // render-pattern-synthesized kernels, where no explicit pixel call exists.
+  const MAX_RENDER_SIZE = 2048;
+
+  const triggerOnDemandRender = (w, h) => {
+    if (!shaderRenderer || !shaderEnabled || !screenOnDemand) return;
+    const width = Math.max(1, Math.min(MAX_RENDER_SIZE, Math.round(w)));
+    const height = Math.max(1, Math.min(MAX_RENDER_SIZE, Math.round(h)));
+    try {
+      shaderRenderer.resize(width, height);
+      shaderRenderer.render();
+    } catch (e) {
+      console.error('[gpu-shader] on-demand render error:', e && e.message || e);
+    }
+  };
+
+  const registerPixelAddonBlock = (proccode, paramNames) => {
+    unregisterPixelAddonBlock();
+    if (!vm.runtime || typeof vm.runtime.addAddonBlock !== 'function') {
+      console.warn('[gpu-shader] runtime.addAddonBlock is unavailable; on-demand pixel disabled.');
+      return false;
+    }
+    vm.runtime.addAddonBlock({
+      procedureCode: proccode,
+      arguments: paramNames.slice(),
+      hidden: true,
+      callback: (args) => {
+        if (!paramNames.length) return;
+        const w = parseNum(args[paramNames[0]]);
+        const h = paramNames.length > 1 ? parseNum(args[paramNames[1]]) : w;
+        triggerOnDemandRender(w, h);
+      }
+    });
+    _registeredAddonProccode = proccode;
+    return true;
+  };
+
+  const unregisterPixelAddonBlock = () => {
+    if (_registeredAddonProccode && vm.runtime && vm.runtime.addonBlocks) {
+      delete vm.runtime.addonBlocks[_registeredAddonProccode];
+      if (typeof vm.runtime.resetAllCaches === 'function') {
+        vm.runtime.resetAllCaches();
+      }
+      _registeredAddonProccode = null;
+    }
+  };
+
   // --- the master enable routine (ported from scaffolding._tryEnableShader) ---
   const tryEnableShader = () => {
     const t0 = performance.now();
@@ -518,6 +578,8 @@ export default async function ({addon, console}) {
       kernelScheduler = null;
     }
     restoreProceduresOnCPU();
+    unregisterPixelAddonBlock();
+    screenOnDemand = false;
 
     const runtime = vm && vm.runtime;
     if (!runtime) return;
@@ -559,12 +621,29 @@ export default async function ({addon, console}) {
       shaderRenderer.uploadListData();
       const stageW = (runtime.constructor.STAGE_WIDTH) || 480;
       const stageH = (runtime.constructor.STAGE_HEIGHT) || 360;
-      shaderRenderer.resize(stageW * shaderScale, stageH * shaderScale);
       shaderCanvas.style.display = 'none';
       shaderRenderer.clearPostRenderHooks();
       shaderRenderer.addPostRenderHook(blitToPenLayer);
       shaderRenderer.resetTime();
-      shaderRenderer.start();
+      // On-demand: a user-defined pixel(w, h) block becomes an addon block
+      // that triggers one GPU render pass per CPU call. Continuous: a
+      // render-pattern-synthesized kernel (no explicit pixel call) keeps
+      // rendering every frame via the RAF loop.
+      screenOnDemand = !detection.renderPattern;
+      if (screenOnDemand) {
+        const registered = registerPixelAddonBlock(screenKernel.proccode, screenKernel.paramNames);
+        if (registered) {
+          shaderRenderer.resize(stageW, stageH);
+        } else {
+          // No addon-block support in this VM; fall back to continuous render.
+          screenOnDemand = false;
+          shaderRenderer.resize(stageW * shaderScale, stageH * shaderScale);
+          shaderRenderer.start();
+        }
+      } else {
+        shaderRenderer.resize(stageW * shaderScale, stageH * shaderScale);
+        shaderRenderer.start();
+      }
       screenEnabled = true;
     } else {
       shaderCanvas.style.display = 'none';
@@ -592,7 +671,10 @@ export default async function ({addon, console}) {
     }
 
     const proccodesToSkip = [];
-    if (screenEnabled && screenKernel) proccodesToSkip.push(screenKernel.proccode);
+    // The user-defined pixel screen kernel is NOT skipped on the CPU: it is
+    // registered as an addon block whose callback drives the GPU, so CPU
+    // calls to pixel(w, h) must keep dispatching (into the addon callback).
+    // Only render-pattern loops and compute kernels are NOP'd on the CPU.
     if (detection.renderPattern) proccodesToSkip.push(detection.renderPattern.renderProccode);
     for (const entry of kernelScheduler.kernels) {
       proccodesToSkip.push(entry.kernel.proccode);
@@ -658,7 +740,7 @@ export default async function ({addon, console}) {
 
     shaderEnabled = true;
     shadersDirty = false;
-    console.log('[gpu-shader] Enabled. Screen:', screenEnabled, 'Compute kernels:', kernelScheduler.kernels.length,
+    console.log('[gpu-shader] Enabled. Screen:', screenEnabled, '(on-demand:', screenOnDemand + ')', 'Compute kernels:', kernelScheduler.kernels.length,
       `| detect:${(t2-t1).toFixed(0)}ms compile+schedule:${(t3-t2).toFixed(0)}ms skip:${(t4-t3).toFixed(0)}ms total:${(t4-t0).toFixed(0)}ms`);
   };
 
@@ -667,6 +749,7 @@ export default async function ({addon, console}) {
       shaderRenderer.clearPostRenderHooks();
       shaderRenderer.stop();
     }
+    unregisterPixelAddonBlock();
     if (kernelScheduler) {
       kernelScheduler.stop();
       kernelScheduler = null;
@@ -675,6 +758,7 @@ export default async function ({addon, console}) {
     restoreProceduresOnCPU();
     cleanupOwnedPenLayer();
     shaderEnabled = false;
+    screenOnDemand = false;
   };
 
   // --- init ShaderRenderer (own WebGL context on the overlay canvas) ---
@@ -701,7 +785,9 @@ export default async function ({addon, console}) {
       tryEnableShader();
     } else if (shaderRenderer && shaderEnabled) {
       shaderRenderer.resetTime();
-      shaderRenderer.start();
+      if (!screenOnDemand) {
+        shaderRenderer.start();
+      }
       if (kernelScheduler && !kernelScheduler.running) kernelScheduler.start();
     }
     if (shaderRenderer && shaderEnabled) {
@@ -711,6 +797,7 @@ export default async function ({addon, console}) {
 
   vm.runtime.on('PROJECT_RUN_STOP', () => {
     if (shaderRenderer) shaderRenderer.stop();
+    if (screenOnDemand) unregisterPixelAddonBlock();
     if (kernelScheduler) kernelScheduler.stop();
     restoreProceduresOnCPU();
     shadersDirty = true;
@@ -733,9 +820,11 @@ export default async function ({addon, console}) {
   vm.runtime.on('RUNTIME_PAUSED', () => {
     _wasRenderingBeforePause = !!(shaderRenderer && shaderRenderer._running);
     _wasSchedulerRunningBeforePause = !!(kernelScheduler && kernelScheduler.running);
-    if (shaderRenderer && _wasRenderingBeforePause) {
+    if (shaderRenderer) {
+      if (_wasRenderingBeforePause) shaderRenderer.stop();
+      // Pause u_time for both continuous and on-demand screen shaders so
+      // animations don't jump across a pause (matches Scratch timer semantics).
       shaderRenderer.pauseTime();
-      shaderRenderer.stop();
     }
     if (kernelScheduler && _wasSchedulerRunningBeforePause) {
       kernelScheduler.stop();
@@ -743,9 +832,11 @@ export default async function ({addon, console}) {
   });
 
   vm.runtime.on('RUNTIME_UNPAUSED', () => {
-    if (shaderRenderer && _wasRenderingBeforePause && shaderEnabled) {
+    if (shaderRenderer && shaderEnabled) {
       shaderRenderer.resumeTime();
-      if (!shaderRenderer._running) shaderRenderer.start();
+      if (_wasRenderingBeforePause && !shaderRenderer._running) {
+        shaderRenderer.start();
+      }
     }
     if (kernelScheduler && _wasSchedulerRunningBeforePause && shaderEnabled && !kernelScheduler.running) {
       kernelScheduler.start();
@@ -760,7 +851,7 @@ export default async function ({addon, console}) {
     const newOnTop = !!addon.settings.get('shader_on_top');
     if (newScale !== shaderScale) {
       shaderScale = newScale;
-      if (shaderRenderer && shaderEnabled) {
+      if (shaderRenderer && shaderEnabled && !screenOnDemand) {
         const runtime = vm.runtime;
         const stageW = (runtime && runtime.constructor.STAGE_WIDTH) || 480;
         const stageH = (runtime && runtime.constructor.STAGE_HEIGHT) || 360;
